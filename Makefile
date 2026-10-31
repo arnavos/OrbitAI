@@ -21,7 +21,7 @@ test-frontend:
 
 test-backend:
 	@echo "==> Running backend tests (Pytest)..."
-	cd backend && uv run pytest
+	cd backend && uv run pytest -v -c pyproject.toml
 
 lint:
 	@echo "==> Checking TypeScript and Python linting..."

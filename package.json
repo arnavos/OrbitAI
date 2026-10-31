@@ -8,7 +8,7 @@
     "build:frontend": "pnpm --filter @orbit/frontend build",
     "test:frontend": "pnpm --filter @orbit/frontend test",
     "dev:backend": "cd backend && uv run uvicorn app.main:app --reload --port 18420 --host 127.0.0.1",
-    "test:backend": "cd backend && uv run pytest",
+    "test:backend": "cd backend && uv run pytest -v -c pyproject.toml",
     "lint:backend": "cd backend && uv run ruff check .",
     "test": "pnpm test:frontend && pnpm test:backend",
     "lint": "pnpm --filter @orbit/frontend lint && pnpm lint:backend",
