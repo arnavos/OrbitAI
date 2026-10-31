@@ -1,5 +1,7 @@
-"""ORBIT FastAPI Application Entrypoint and Lifespan Orchestration."""
-
+import errno
+import os
+import threading
+import time
 import uuid
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
@@ -26,6 +28,35 @@ from app.core.logging import (
 from app.db.session import engine, init_db
 
 
+def _start_parent_watchdog(parent_pid: int) -> None:
+    """Monitor parent PID to automatically terminate if the parent desktop host crashes."""
+
+    def _watchdog_loop():
+        while True:
+            time.sleep(1.0)
+            # Check 1: Is parent PID still running?
+            try:
+                os.kill(parent_pid, 0)
+            except OSError as err:
+                if err.errno == errno.ESRCH:
+                    logger.warning(
+                        "Parent process %d terminated (ESRCH). Sidecar self-terminating...",
+                        parent_pid,
+                    )
+                    os._exit(0)
+            # Check 2: If directly spawned and adopted by launchd/init (PID 1)
+            current_ppid = os.getppid()
+            if current_ppid == 1 and parent_pid != 1:
+                logger.warning(
+                    "Parent process %d adopted by PID 1. Sidecar self-terminating...",
+                    parent_pid,
+                )
+                os._exit(0)
+
+    thread = threading.Thread(target=_watchdog_loop, daemon=True, name="parent-watchdog")
+    thread.start()
+
+
 class CorrelationIdMiddleware(BaseHTTPMiddleware):
     """Middleware extracting or generating X-Correlation-ID for every HTTP request."""
 
@@ -49,7 +80,18 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
         extra={"extra_data": {"host": settings.host, "port": settings.port}},
     )
 
-    # 2. Initialize database schema
+    # 2. Check and activate parent watchdog if managed by desktop host
+    parent_pid_env = os.environ.get("ORBIT_PARENT_PID")
+    if parent_pid_env and settings.app_env != "testing":
+        try:
+            parent_pid = int(parent_pid_env)
+            if parent_pid > 1:
+                logger.info(f"Subprocess watchdog active for parent PID: {parent_pid}")
+                _start_parent_watchdog(parent_pid)
+        except ValueError:
+            pass
+
+    # 3. Initialize database schema
     try:
         await init_db()
     except Exception as e:
@@ -58,7 +100,7 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
 
     yield
 
-    # 3. Graceful shutdown: close database connections
+    # 4. Graceful shutdown: close database connections
     logger.info("Shutting down database engine...")
     await engine.dispose()
     logger.info("Application shutdown complete.")

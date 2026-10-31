@@ -1,7 +1,34 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Activity, ShieldCheck, Terminal, Cpu, HardDrive } from 'lucide-react';
+import { backendClient } from './services/backend';
 
 export const App: React.FC = () => {
+  const [connectionStatus, setConnectionStatus] = useState<string>('INITIALIZING');
+  const [backendPort, setBackendPort] = useState<string | null>(null);
+
+  useEffect(() => {
+    let isMounted = true;
+    async function initConnection() {
+      const conn = await backendClient.getConnection();
+      if (!isMounted) return;
+      if (conn) {
+        try {
+          const url = new URL(conn.apiUrl);
+          setBackendPort(url.port);
+          setConnectionStatus('CONNECTED');
+        } catch {
+          setConnectionStatus('CONNECTED');
+        }
+      } else {
+        setConnectionStatus('STANDALONE DEV');
+      }
+    }
+    initConnection();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', padding: '24px', gap: '20px' }}>
       {/* Header */}
@@ -19,7 +46,7 @@ export const App: React.FC = () => {
         </div>
         <div className="status-badge" style={{ background: 'rgba(99, 102, 241, 0.1)', color: 'var(--accent-primary)', border: '1px solid var(--border-accent)' }}>
           <span className="status-dot" style={{ backgroundColor: 'var(--accent-primary)' }}></span>
-          STAGE 0.2 SCAFFOLD
+          STAGE 0.4: {connectionStatus} {backendPort ? `[PORT ${backendPort}]` : ''}
         </div>
       </header>
 
