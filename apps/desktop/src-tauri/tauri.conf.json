@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "identifier": "com.orbit.app",
   "build": {
-    "beforeDevCommand": "pnpm --filter @orbit/frontend build",
+    "beforeDevCommand": "pnpm --filter @orbit/frontend dev",
     "beforeBuildCommand": "pnpm --filter @orbit/frontend build",
     "devUrl": "http://127.0.0.1:5173",
     "frontendDist": "../frontend/dist"
@@ -12,6 +12,7 @@
   "app": {
     "windows": [
       {
+        "label": "main",
         "title": "ORBIT",
         "width": 1200,
         "height": 800,

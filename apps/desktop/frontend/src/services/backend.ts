@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core';
+import { invoke, isTauri } from '@tauri-apps/api/core';
 
 export interface BackendConnectionInfo {
   apiUrl: string;
@@ -9,7 +9,25 @@ export interface BackendConnectionInfo {
 export interface HealthResponse {
   status: string;
   version: string;
-  uptimeSeconds: number;
+  uptime_seconds?: number;
+  uptimeSeconds?: number;
+}
+
+export interface ApiResponse<T> {
+  success: boolean;
+  data: T;
+  error?: string | null;
+  correlation_id?: string;
+  timestamp?: string;
+}
+
+/**
+ * Check whether code is running inside the native Tauri desktop shell
+ * vs standard web browser development mode.
+ */
+export function isTauriEnvironment(): boolean {
+  if (typeof window === 'undefined') return false;
+  return isTauri() || '__TAURI_INTERNALS__' in window;
 }
 
 class BackendClient {
@@ -17,12 +35,24 @@ class BackendClient {
   private isInitializing: Promise<BackendConnectionInfo | null> | null = null;
 
   /**
-   * Securely retrieve backend connection parameters via Tauri IPC.
-   * If running in standalone browser Vite dev mode, falls back cleanly.
+   * Determine if running in the native desktop container.
    */
-  async getConnection(): Promise<BackendConnectionInfo | null> {
+  isDesktop(): boolean {
+    return isTauriEnvironment();
+  }
+
+  /**
+   * Securely retrieve backend connection parameters via Tauri IPC.
+   * If running in standalone browser Vite dev mode, returns null immediately.
+   * If running in Tauri desktop, retries with backoff while the sidecar completes startup.
+   */
+  async getConnection(maxRetries = 10, retryDelayMs = 400): Promise<BackendConnectionInfo | null> {
     if (this.connection) {
       return this.connection;
+    }
+
+    if (!this.isDesktop()) {
+      return null;
     }
 
     if (this.isInitializing) {
@@ -30,15 +60,20 @@ class BackendClient {
     }
 
     this.isInitializing = (async () => {
-      try {
-        if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
+      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
           const info = await invoke<BackendConnectionInfo>('get_backend_connection');
-          this.connection = info;
-          return info;
+          if (info && info.apiUrl && info.sessionToken) {
+            this.connection = info;
+            return info;
+          }
+        } catch (err) {
+          if (attempt === maxRetries) {
+            console.error('Failed to retrieve backend connection via Tauri IPC:', err);
+          } else {
+            await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+          }
         }
-      } catch {
-        // Never log session tokens or sensitive payload in error outputs
-        console.warn('Backend IPC connection not ready or unavailable.');
       }
       return null;
     })();
@@ -77,10 +112,14 @@ class BackendClient {
   }
 
   /**
-   * Probe backend health check.
+   * Probe backend health check and unwrap envelope response.
    */
   async checkHealth(): Promise<HealthResponse> {
-    return this.fetch<HealthResponse>('/api/v1/health');
+    const res = await this.fetch<ApiResponse<HealthResponse> | HealthResponse>('/api/v1/health');
+    if ('data' in res && res.data) {
+      return res.data;
+    }
+    return res as HealthResponse;
   }
 }
 

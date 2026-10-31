@@ -35,4 +35,11 @@ describe('App Scaffolding & Lifecycle', () => {
     });
     expect(screen.getByText(/STAGE 0.4:/)).toBeInTheDocument();
   });
+
+  it('displays STANDALONE DEV when running in standard browser mode', async () => {
+    await act(async () => {
+      render(<App />);
+    });
+    expect(screen.getByText(/STAGE 0.4: STANDALONE DEV/)).toBeInTheDocument();
+  });
 });

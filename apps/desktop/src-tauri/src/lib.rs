@@ -5,14 +5,21 @@ pub mod sidecar;
 use sidecar::{AppState, BackendConnectionInfo};
 
 /// Secure IPC command providing connection parameters exclusively to the internal webview.
+/// If called while the sidecar is completing initial startup, awaits readiness up to 15 seconds.
 #[tauri::command]
 async fn get_backend_connection(
     state: tauri::State<'_, AppState>,
 ) -> Result<BackendConnectionInfo, String> {
-    let guard = state.connection_info.lock().await;
-    guard
-        .clone()
-        .ok_or_else(|| "Backend connection is not yet initialized".to_string())
+    for _ in 0..150 {
+        {
+            let guard = state.connection_info.lock().await;
+            if let Some(ref info) = *guard {
+                return Ok(info.clone());
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    Err("Backend connection initialization timed out after 15 seconds".to_string())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

@@ -8,21 +8,49 @@ export const App: React.FC = () => {
 
   useEffect(() => {
     let isMounted = true;
+
     async function initConnection() {
-      const conn = await backendClient.getConnection();
-      if (!isMounted) return;
-      if (conn) {
-        try {
+      // 1. In browser development mode, gracefully display STANDALONE DEV
+      if (!backendClient.isDesktop()) {
+        if (isMounted) {
+          setConnectionStatus('STANDALONE DEV');
+        }
+        return;
+      }
+
+      // 2. In native desktop mode, show CONNECTING while retrieving IPC parameters
+      if (isMounted) {
+        setConnectionStatus('CONNECTING');
+      }
+
+      try {
+        const conn = await backendClient.getConnection();
+        if (!isMounted) return;
+
+        if (!conn) {
+          setConnectionStatus('INITIALIZATION TIMEOUT');
+          return;
+        }
+
+        // 3. Strict verification: probe backend health with session token authentication
+        const health = await backendClient.checkHealth();
+        if (!isMounted) return;
+
+        if (health && health.status === 'healthy') {
           const url = new URL(conn.apiUrl);
           setBackendPort(url.port);
           setConnectionStatus('CONNECTED');
-        } catch {
-          setConnectionStatus('CONNECTED');
+        } else {
+          setConnectionStatus('HEALTH UNHEALTHY');
         }
-      } else {
-        setConnectionStatus('STANDALONE DEV');
+      } catch (err) {
+        if (isMounted) {
+          console.error('Failed to verify backend health:', err);
+          setConnectionStatus('HEALTH CHECK FAILED');
+        }
       }
     }
+
     initConnection();
     return () => {
       isMounted = false;
