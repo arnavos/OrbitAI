@@ -1,24 +1,16 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
+import type {
+  APIEnvelope,
+  AuditEventResponse,
+  DetailedHealthResponse,
+  HealthResponse,
+  SystemInfoResponse,
+} from '../types/contracts';
 
 export interface BackendConnectionInfo {
   apiUrl: string;
   wsUrl: string;
   sessionToken: string;
-}
-
-export interface HealthResponse {
-  status: string;
-  version: string;
-  uptime_seconds?: number;
-  uptimeSeconds?: number;
-}
-
-export interface ApiResponse<T> {
-  success: boolean;
-  data: T;
-  error?: string | null;
-  correlation_id?: string;
-  timestamp?: string;
 }
 
 /**
@@ -30,7 +22,7 @@ export function isTauriEnvironment(): boolean {
   return isTauri() || '__TAURI_INTERNALS__' in window;
 }
 
-class BackendClient {
+export class BackendClient {
   private connection: BackendConnectionInfo | null = null;
   private isInitializing: Promise<BackendConnectionInfo | null> | null = null;
 
@@ -39,6 +31,13 @@ class BackendClient {
    */
   isDesktop(): boolean {
     return isTauriEnvironment();
+  }
+
+  /**
+   * Return cached connection information if already retrieved.
+   */
+  getCachedConnection(): BackendConnectionInfo | null {
+    return this.connection;
   }
 
   /**
@@ -93,7 +92,8 @@ class BackendClient {
     const headers = new Headers(options.headers || {});
 
     if (conn?.sessionToken) {
-      headers.set('X-Session-Token', conn.sessionToken);
+      headers.set('X-Orbit-Session-Token', conn.sessionToken);
+      headers.set('Authorization', `Bearer ${conn.sessionToken}`);
     }
     headers.set('Content-Type', 'application/json');
 
@@ -105,21 +105,62 @@ class BackendClient {
 
     if (!response.ok) {
       const errorText = await response.text();
-      throw new Error(`API error (${response.status}): ${errorText}`);
+      let errorMsg = `API error (${response.status})`;
+      try {
+        const errorJson = JSON.parse(errorText);
+        if (errorJson.error?.message) {
+          errorMsg = `${errorMsg}: ${errorJson.error.message}`;
+        }
+      } catch {
+        errorMsg = `${errorMsg}: ${errorText}`;
+      }
+      throw new Error(errorMsg);
     }
 
     return response.json();
   }
 
   /**
-   * Probe backend health check and unwrap envelope response.
+   * Probe public or authenticated health check and unwrap envelope response.
    */
   async checkHealth(): Promise<HealthResponse> {
-    const res = await this.fetch<ApiResponse<HealthResponse> | HealthResponse>('/api/v1/health');
+    const res = await this.fetch<APIEnvelope<HealthResponse> | HealthResponse>('/api/v1/health');
     if ('data' in res && res.data) {
       return res.data;
     }
     return res as HealthResponse;
+  }
+
+  /**
+   * Fetch authenticated detailed system health telemetry.
+   */
+  async getDetailedHealth(): Promise<DetailedHealthResponse> {
+    const res = await this.fetch<APIEnvelope<DetailedHealthResponse>>('/api/v1/health/detailed');
+    if (res.data) {
+      return res.data;
+    }
+    throw new Error('Detailed health telemetry unavailable');
+  }
+
+  /**
+   * Fetch host platform specifications and memory metrics.
+   */
+  async getSystemInfo(): Promise<SystemInfoResponse> {
+    const res = await this.fetch<APIEnvelope<SystemInfoResponse>>('/api/v1/system/info');
+    if (res.data) {
+      return res.data;
+    }
+    throw new Error('System information unavailable');
+  }
+
+  /**
+   * Fetch recent immutable audit events.
+   */
+  async getAuditEvents(limit = 20): Promise<AuditEventResponse[]> {
+    const res = await this.fetch<APIEnvelope<AuditEventResponse[]>>(
+      `/api/v1/system/audit?limit=${limit}`
+    );
+    return res.data || [];
   }
 }
 

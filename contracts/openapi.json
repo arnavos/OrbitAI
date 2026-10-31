@@ -1,0 +1,887 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "ORBIT Local Backend",
+    "description": "Local native backend daemon for the ORBIT platform",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/api/v1/health": {
+      "get": {
+        "tags": [
+          "Health"
+        ],
+        "summary": "Basic Health Check",
+        "description": "Public basic health probe used by the Tauri desktop supervisor for liveness.",
+        "operationId": "basic_health_check_api_v1_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIResponse_HealthResponse_"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/health/detailed": {
+      "get": {
+        "tags": [
+          "Health"
+        ],
+        "summary": "Detailed Health Check",
+        "description": "Authenticated detailed health probe with memory, CPU, and SQLite WAL diagnostics.",
+        "operationId": "detailed_health_check_api_v1_health_detailed_get",
+        "parameters": [
+          {
+            "name": "x-orbit-session-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Orbit-Session-Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIResponse_DetailedHealthResponse_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/system/info": {
+      "get": {
+        "tags": [
+          "System"
+        ],
+        "summary": "Get System Info",
+        "description": "Retrieve host specifications, platform architecture, and memory capacities.",
+        "operationId": "get_system_info_api_v1_system_info_get",
+        "parameters": [
+          {
+            "name": "x-orbit-session-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Orbit-Session-Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIResponse_SystemInfoResponse_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/system/settings/{key}": {
+      "get": {
+        "tags": [
+          "System"
+        ],
+        "summary": "Get Setting",
+        "description": "Retrieve a persistent system configuration setting.",
+        "operationId": "get_setting_api_v1_system_settings__key__get",
+        "parameters": [
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Key"
+            }
+          },
+          {
+            "name": "x-orbit-session-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Orbit-Session-Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIResponse_SystemSettingResponse_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/system/settings": {
+      "post": {
+        "tags": [
+          "System"
+        ],
+        "summary": "Set Setting",
+        "description": "Persist or update a system setting and record an audit log entry.",
+        "operationId": "set_setting_api_v1_system_settings_post",
+        "parameters": [
+          {
+            "name": "x-orbit-session-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Orbit-Session-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SystemSettingCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIResponse_SystemSettingResponse_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/system/audit": {
+      "get": {
+        "tags": [
+          "System"
+        ],
+        "summary": "List Audit Events",
+        "description": "Retrieve recent immutable audit event records.",
+        "operationId": "list_audit_events_api_v1_system_audit_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "x-orbit-session-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Orbit-Session-Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIResponse_list_AuditEventResponse__"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "APIResponse_DetailedHealthResponse_": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "description": "True if operation succeeded, false otherwise"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DetailedHealthResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Payload data returned on success"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ErrorDetail"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Error information on failure"
+          },
+          "correlation_id": {
+            "type": "string",
+            "title": "Correlation Id",
+            "description": "Unique request tracing ID"
+          },
+          "timestamp": {
+            "type": "string",
+            "title": "Timestamp",
+            "description": "ISO 8601 UTC timestamp of response generation"
+          }
+        },
+        "type": "object",
+        "required": [
+          "success",
+          "correlation_id"
+        ],
+        "title": "APIResponse[DetailedHealthResponse]"
+      },
+      "APIResponse_HealthResponse_": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "description": "True if operation succeeded, false otherwise"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HealthResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Payload data returned on success"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ErrorDetail"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Error information on failure"
+          },
+          "correlation_id": {
+            "type": "string",
+            "title": "Correlation Id",
+            "description": "Unique request tracing ID"
+          },
+          "timestamp": {
+            "type": "string",
+            "title": "Timestamp",
+            "description": "ISO 8601 UTC timestamp of response generation"
+          }
+        },
+        "type": "object",
+        "required": [
+          "success",
+          "correlation_id"
+        ],
+        "title": "APIResponse[HealthResponse]"
+      },
+      "APIResponse_SystemInfoResponse_": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "description": "True if operation succeeded, false otherwise"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SystemInfoResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Payload data returned on success"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ErrorDetail"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Error information on failure"
+          },
+          "correlation_id": {
+            "type": "string",
+            "title": "Correlation Id",
+            "description": "Unique request tracing ID"
+          },
+          "timestamp": {
+            "type": "string",
+            "title": "Timestamp",
+            "description": "ISO 8601 UTC timestamp of response generation"
+          }
+        },
+        "type": "object",
+        "required": [
+          "success",
+          "correlation_id"
+        ],
+        "title": "APIResponse[SystemInfoResponse]"
+      },
+      "APIResponse_SystemSettingResponse_": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "description": "True if operation succeeded, false otherwise"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SystemSettingResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Payload data returned on success"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ErrorDetail"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Error information on failure"
+          },
+          "correlation_id": {
+            "type": "string",
+            "title": "Correlation Id",
+            "description": "Unique request tracing ID"
+          },
+          "timestamp": {
+            "type": "string",
+            "title": "Timestamp",
+            "description": "ISO 8601 UTC timestamp of response generation"
+          }
+        },
+        "type": "object",
+        "required": [
+          "success",
+          "correlation_id"
+        ],
+        "title": "APIResponse[SystemSettingResponse]"
+      },
+      "APIResponse_list_AuditEventResponse__": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "description": "True if operation succeeded, false otherwise"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/AuditEventResponse"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data",
+            "description": "Payload data returned on success"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ErrorDetail"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Error information on failure"
+          },
+          "correlation_id": {
+            "type": "string",
+            "title": "Correlation Id",
+            "description": "Unique request tracing ID"
+          },
+          "timestamp": {
+            "type": "string",
+            "title": "Timestamp",
+            "description": "ISO 8601 UTC timestamp of response generation"
+          }
+        },
+        "type": "object",
+        "required": [
+          "success",
+          "correlation_id"
+        ],
+        "title": "APIResponse[list[AuditEventResponse]]"
+      },
+      "AuditEventResponse": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "correlation_id": {
+            "type": "string",
+            "title": "Correlation Id"
+          },
+          "event_type": {
+            "type": "string",
+            "title": "Event Type"
+          },
+          "actor": {
+            "type": "string",
+            "title": "Actor"
+          },
+          "severity": {
+            "type": "string",
+            "title": "Severity"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Payload"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "correlation_id",
+          "event_type",
+          "actor",
+          "severity",
+          "payload",
+          "created_at"
+        ],
+        "title": "AuditEventResponse",
+        "description": "Audit event record."
+      },
+      "DetailedHealthResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "description": "Overall health status: 'healthy', 'degraded', or 'unhealthy'"
+          },
+          "version": {
+            "type": "string",
+            "title": "Version",
+            "description": "Application version"
+          },
+          "uptime_seconds": {
+            "type": "number",
+            "title": "Uptime Seconds",
+            "description": "Elapsed uptime of the backend process"
+          },
+          "pid": {
+            "type": "integer",
+            "title": "Pid",
+            "description": "Operating system Process ID of the backend daemon"
+          },
+          "memory_rss_mb": {
+            "type": "number",
+            "title": "Memory Rss Mb",
+            "description": "Resident Set Size memory in MB"
+          },
+          "cpu_percent": {
+            "type": "number",
+            "title": "Cpu Percent",
+            "description": "Current process CPU utilization percentage"
+          },
+          "database_connected": {
+            "type": "boolean",
+            "title": "Database Connected",
+            "description": "Database connectivity status"
+          },
+          "database_latency_ms": {
+            "type": "number",
+            "title": "Database Latency Ms",
+            "description": "Latency of SQLite roundtrip probe in ms"
+          },
+          "journal_mode": {
+            "type": "string",
+            "title": "Journal Mode",
+            "description": "Current SQLite journal mode (e.g. WAL)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "version",
+          "uptime_seconds",
+          "pid",
+          "memory_rss_mb",
+          "cpu_percent",
+          "database_connected",
+          "database_latency_ms",
+          "journal_mode"
+        ],
+        "title": "DetailedHealthResponse",
+        "description": "Detailed health telemetry with resource consumption and database diagnostics."
+      },
+      "ErrorDetail": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code",
+            "description": "Machine-readable error identifier"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "description": "Human-readable explanation of the error"
+          },
+          "details": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Details",
+            "description": "Additional context or validation errors"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "ErrorDetail",
+        "description": "Normalized error detail payload."
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "HealthResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "description": "Overall health status: 'healthy', 'degraded', or 'unhealthy'"
+          },
+          "version": {
+            "type": "string",
+            "title": "Version",
+            "description": "Application version"
+          },
+          "uptime_seconds": {
+            "type": "number",
+            "title": "Uptime Seconds",
+            "description": "Elapsed uptime of the backend process"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "version",
+          "uptime_seconds"
+        ],
+        "title": "HealthResponse",
+        "description": "Basic health probe response."
+      },
+      "SystemInfoResponse": {
+        "properties": {
+          "app_name": {
+            "type": "string",
+            "title": "App Name"
+          },
+          "app_version": {
+            "type": "string",
+            "title": "App Version"
+          },
+          "environment": {
+            "type": "string",
+            "title": "Environment"
+          },
+          "platform": {
+            "type": "string",
+            "title": "Platform"
+          },
+          "architecture": {
+            "type": "string",
+            "title": "Architecture"
+          },
+          "python_version": {
+            "type": "string",
+            "title": "Python Version"
+          },
+          "sqlite_version": {
+            "type": "string",
+            "title": "Sqlite Version"
+          },
+          "total_memory_mb": {
+            "type": "number",
+            "title": "Total Memory Mb"
+          },
+          "available_memory_mb": {
+            "type": "number",
+            "title": "Available Memory Mb"
+          }
+        },
+        "type": "object",
+        "required": [
+          "app_name",
+          "app_version",
+          "environment",
+          "platform",
+          "architecture",
+          "python_version",
+          "sqlite_version",
+          "total_memory_mb",
+          "available_memory_mb"
+        ],
+        "title": "SystemInfoResponse",
+        "description": "Host operating system, architecture, and runtime environment specifications."
+      },
+      "SystemSettingCreate": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "maxLength": 128,
+            "title": "Key",
+            "description": "Setting configuration key"
+          },
+          "value": {
+            "title": "Value",
+            "description": "Arbitrary JSON-serializable value"
+          },
+          "is_encrypted": {
+            "type": "boolean",
+            "title": "Is Encrypted",
+            "description": "Whether value requires encryption at rest",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "key",
+          "value"
+        ],
+        "title": "SystemSettingCreate",
+        "description": "Payload to create or update a system setting."
+      },
+      "SystemSettingResponse": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "title": "Key"
+          },
+          "value": {
+            "title": "Value"
+          },
+          "is_encrypted": {
+            "type": "boolean",
+            "title": "Is Encrypted"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "key",
+          "value",
+          "is_encrypted",
+          "updated_at"
+        ],
+        "title": "SystemSettingResponse",
+        "description": "Retrieved system setting."
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    }
+  }
+}

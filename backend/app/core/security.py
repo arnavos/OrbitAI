@@ -65,12 +65,25 @@ async def authenticate_websocket(websocket: WebSocket) -> bool:
     # 1. Check Origin
     origin = websocket.headers.get("origin")
     if origin and not is_origin_allowed(origin):
-        logger.warning(f"WebSocket rejected: unauthorized origin '{origin}'")
+        logger.warning("WebSocket rejected: unauthorized origin '%s'", origin)
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Unauthorized origin")
         return False
 
-    # 2. Check Session Token (from query parameter or header)
-    ws_token = websocket.query_params.get("token") or websocket.headers.get(SESSION_TOKEN_HEADER)
+    # 2. Extract Session Token (Sec-WebSocket-Protocol, HTTP header, or fallback query parameter)
+    ws_token = None
+    proto_header = websocket.headers.get("sec-websocket-protocol")
+    if proto_header:
+        protocols = [p.strip() for p in proto_header.split(",")]
+        if "orbit-auth" in protocols:
+            idx = protocols.index("orbit-auth")
+            if idx + 1 < len(protocols):
+                ws_token = protocols[idx + 1]
+
+    if not ws_token:
+        ws_token = websocket.headers.get(SESSION_TOKEN_HEADER) or websocket.query_params.get(
+            "token"
+        )
+
     if not verify_session_token(ws_token):
         logger.warning("WebSocket rejected: missing or invalid session token")
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Invalid session token")

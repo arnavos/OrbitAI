@@ -85,6 +85,7 @@ class SystemService:
             status=status_str,
             version=settings.app_version,
             uptime_seconds=cls.get_uptime_seconds(),
+            pid=proc.pid,
             memory_rss_mb=memory_rss_mb,
             cpu_percent=cpu_percent,
             database_connected=db_connected,

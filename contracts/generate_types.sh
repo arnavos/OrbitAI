@@ -1,23 +1,25 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
 echo "==> Exporting OpenAPI schema from FastAPI backend..."
-python3 -c "
+"${ROOT_DIR}/backend/.venv/bin/python3" -c "
 import json
 import sys
 from pathlib import Path
 
-# Add backend to path
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'backend'))
+sys.path.insert(0, str(Path('${ROOT_DIR}') / 'backend'))
 from app.main import app
 
 openapi_schema = app.openapi()
-with open(Path(__file__).resolve().parent / 'openapi.json', 'w') as f:
+out_path = Path('${SCRIPT_DIR}') / 'openapi.json'
+with open(out_path, 'w') as f:
     json.dump(openapi_schema, f, indent=2)
-print('OpenAPI schema exported to contracts/openapi.json')
+print(f'OpenAPI schema exported to {out_path}')
 "
 
 echo "==> Generating TypeScript contracts..."
-# Once openapi-typescript is invoked:
-# pnpm dlx openapi-typescript contracts/openapi.json -o apps/desktop/frontend/src/contracts/api.d.ts
-echo "Done."
+pnpm dlx openapi-typescript "${SCRIPT_DIR}/openapi.json" -o "${ROOT_DIR}/apps/desktop/frontend/src/types/api.ts"
+echo "==> TypeScript contracts successfully generated at apps/desktop/frontend/src/types/api.ts"

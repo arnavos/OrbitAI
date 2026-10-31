@@ -41,6 +41,7 @@ async def test_detailed_health_with_valid_auth(async_client: AsyncClient, auth_h
     data = payload["data"]
     assert data["status"] in ("healthy", "degraded")
     assert data["memory_rss_mb"] > 0
+    assert data["pid"] > 0
     assert "cpu_percent" in data
     assert data["database_connected"] is True
     assert data["database_latency_ms"] >= 0

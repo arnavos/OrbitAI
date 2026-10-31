@@ -12,6 +12,7 @@
     "lint:backend": "cd backend && uv run ruff check .",
     "test": "pnpm test:frontend && pnpm test:backend",
     "lint": "pnpm --filter @orbit/frontend lint && pnpm lint:backend",
+    "generate:contracts": "bash contracts/generate_types.sh",
     "tauri": "pnpm --filter @orbit/desktop tauri"
   },
   "devDependencies": {

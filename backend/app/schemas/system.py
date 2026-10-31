@@ -19,6 +19,7 @@ class HealthResponse(BaseModel):
 class DetailedHealthResponse(HealthResponse):
     """Detailed health telemetry with resource consumption and database diagnostics."""
 
+    pid: int = Field(..., description="Operating system Process ID of the backend daemon")
     memory_rss_mb: float = Field(..., description="Resident Set Size memory in MB")
     cpu_percent: float = Field(..., description="Current process CPU utilization percentage")
     database_connected: bool = Field(..., description="Database connectivity status")

@@ -1,151 +1,115 @@
 import React, { useEffect, useState } from 'react';
-import { Activity, ShieldCheck, Terminal, Cpu, HardDrive } from 'lucide-react';
+import { Header } from './components/layout/Header';
+import { StatusBar } from './components/layout/StatusBar';
+import { HostCard } from './components/dashboard/HostCard';
+import { BackendCard } from './components/dashboard/BackendCard';
+import { DatabaseCard } from './components/dashboard/DatabaseCard';
+import { SecurityCard } from './components/dashboard/SecurityCard';
+import { AuditFeed } from './components/dashboard/AuditFeed';
+import { ErrorBoundary } from './components/ui/ErrorBoundary';
+import { useBackend } from './hooks/useBackend';
+import { useWebSocket } from './hooks/useWebSocket';
 import { backendClient } from './services/backend';
+import type {
+  DetailedHealthResponse,
+  SystemInfoResponse,
+  AuditEventResponse,
+} from './types/contracts';
 
 export const App: React.FC = () => {
-  const [connectionStatus, setConnectionStatus] = useState<string>('INITIALIZING');
-  const [backendPort, setBackendPort] = useState<string | null>(null);
+  const { status, connection, port } = useBackend();
+  const isConnected = status === 'CONNECTED';
+  const {
+    wsStatus,
+    telemetry: wsTelemetry,
+    systemInfo: wsSystemInfo,
+    auditEvents: wsAuditEvents,
+    latencyMs,
+  } = useWebSocket(isConnected);
 
+  // Local state for HTTP fallback and initial fast render
+  const [httpTelemetry, setHttpTelemetry] = useState<DetailedHealthResponse | null>(null);
+  const [httpSystemInfo, setHttpSystemInfo] = useState<SystemInfoResponse | null>(null);
+  const [httpAuditEvents, setHttpAuditEvents] = useState<AuditEventResponse[]>([]);
+
+  // Initial HTTP probe when connection is established
   useEffect(() => {
-    let isMounted = true;
-
-    async function initConnection() {
-      // 1. In browser development mode, gracefully display STANDALONE DEV
-      if (!backendClient.isDesktop()) {
-        if (isMounted) {
-          setConnectionStatus('STANDALONE DEV');
-        }
-        return;
-      }
-
-      // 2. In native desktop mode, show CONNECTING while retrieving IPC parameters
-      if (isMounted) {
-        setConnectionStatus('CONNECTING');
-      }
-
-      try {
-        const conn = await backendClient.getConnection();
-        if (!isMounted) return;
-
-        if (!conn) {
-          setConnectionStatus('INITIALIZATION TIMEOUT');
-          return;
-        }
-
-        // 3. Strict verification: probe backend health with session token authentication
-        const health = await backendClient.checkHealth();
-        if (!isMounted) return;
-
-        if (health && health.status === 'healthy') {
-          const url = new URL(conn.apiUrl);
-          setBackendPort(url.port);
-          setConnectionStatus('CONNECTED');
-        } else {
-          setConnectionStatus('HEALTH UNHEALTHY');
-        }
-      } catch (err) {
-        if (isMounted) {
-          console.error('Failed to verify backend health:', err);
-          setConnectionStatus('HEALTH CHECK FAILED');
-        }
-      }
+    let active = true;
+    if (isConnected) {
+      Promise.all([
+        backendClient.getDetailedHealth().catch(() => null),
+        backendClient.getSystemInfo().catch(() => null),
+        backendClient.getAuditEvents().catch(() => []),
+      ]).then(([telemetry, sysInfo, audits]) => {
+        if (!active) return;
+        if (telemetry) setHttpTelemetry(telemetry);
+        if (sysInfo) setHttpSystemInfo(sysInfo);
+        if (audits && audits.length > 0) setHttpAuditEvents(audits);
+      });
     }
-
-    initConnection();
     return () => {
-      isMounted = false;
+      active = false;
     };
-  }, []);
+  }, [isConnected]);
+
+  // Merge real telemetry: prefer live WS updates, fall back to initial HTTP probe
+  const activeTelemetry = wsTelemetry ?? httpTelemetry;
+  const activeSystemInfo = wsSystemInfo ?? httpSystemInfo;
+  const activeAuditEvents = wsAuditEvents.length > 0 ? wsAuditEvents : httpAuditEvents;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', padding: '24px', gap: '20px' }}>
-      {/* Header */}
-      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingBottom: '16px', borderBottom: '1px solid var(--border-subtle)' }}>
-        <div>
-          <h1 style={{ fontSize: '20px', fontWeight: 600, letterSpacing: '-0.02em', display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <span style={{ color: 'var(--accent-primary)', fontSize: '24px' }}>⬡</span> ORBIT
-            <span style={{ fontSize: '11px', padding: '2px 6px', background: 'var(--bg-tertiary)', borderRadius: 'var(--radius-sm)', color: 'var(--text-muted)' }}>
-              M0 Foundation
-            </span>
-          </h1>
-          <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px' }}>
-            Engineering Architecture & Runtime Foundation
-          </p>
-        </div>
-        <div className="status-badge" style={{ background: 'rgba(99, 102, 241, 0.1)', color: 'var(--accent-primary)', border: '1px solid var(--border-accent)' }}>
-          <span className="status-dot" style={{ backgroundColor: 'var(--accent-primary)' }}></span>
-          STAGE 0.4: {connectionStatus} {backendPort ? `[PORT ${backendPort}]` : ''}
-        </div>
-      </header>
+    <ErrorBoundary>
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          height: '100%',
+          padding: '24px',
+          gap: '16px',
+        }}
+      >
+        <Header status={status} port={port} wsStatus={wsStatus} />
 
-      {/* Main Content Area */}
-      <main style={{ flex: 1, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px' }}>
-        <div className="glass-panel" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: 'var(--accent-primary)' }}>
-            <Terminal size={18} />
-            <h2 style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)' }}>Tauri 2 Native Host</h2>
-          </div>
-          <p style={{ fontSize: '12px', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
-            Rust-native desktop container managing windowing, WKWebView, and the Python backend child process lifecycle.
-          </p>
-          <div style={{ marginTop: 'auto', fontSize: '11px', fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>
-            Architecture: Apple Silicon (aarch64)
-          </div>
-        </div>
+        <main
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+            gap: '16px',
+          }}
+        >
+          <HostCard
+            systemInfo={activeSystemInfo}
+            isDesktop={backendClient.isDesktop()}
+          />
+          <BackendCard
+            telemetry={activeTelemetry}
+            systemInfo={activeSystemInfo}
+          />
+          <DatabaseCard
+            telemetry={activeTelemetry}
+            systemInfo={activeSystemInfo}
+          />
+          <SecurityCard
+            backendPort={port}
+            hasSessionToken={Boolean(connection?.sessionToken)}
+          />
+        </main>
 
-        <div className="glass-panel" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: '#10b981' }}>
-            <Cpu size={18} />
-            <h2 style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)' }}>Python 3.13 Backend</h2>
-          </div>
-          <p style={{ fontSize: '12px', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
-            FastAPI local daemon managed with uv. Exclusively bound to 127.0.0.1 with session-token authentication.
-          </p>
-          <div style={{ marginTop: 'auto', fontSize: '11px', fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>
-            Runtime: Pinned Python 3.13.9
-          </div>
-        </div>
+        <section style={{ flex: 1, minHeight: '120px' }}>
+          <AuditFeed
+            events={activeAuditEvents}
+            isConnected={isConnected}
+          />
+        </section>
 
-        <div className="glass-panel" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: '#38bdf8' }}>
-            <HardDrive size={18} />
-            <h2 style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)' }}>SQLite WAL Persistence</h2>
-          </div>
-          <p style={{ fontSize: '12px', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
-            Single-file zero-daemon transactional database with Write-Ahead Logging and Alembic reproducible schema migrations.
-          </p>
-          <div style={{ marginTop: 'auto', fontSize: '11px', fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>
-            Location: com.orbit.app/data/orbit.db
-          </div>
-        </div>
-
-        <div className="glass-panel" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: '#ec4899' }}>
-            <ShieldCheck size={18} />
-            <h2 style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)' }}>Security & Sandboxing</h2>
-          </div>
-          <p style={{ fontSize: '12px', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
-            Strict Content Security Policy (CSP), origin validation, process watchdog, and zero blind execution gates.
-          </p>
-          <div style={{ marginTop: 'auto', fontSize: '11px', fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>
-            Network: Loopback-only (127.0.0.1)
-          </div>
-        </div>
-      </main>
-
-      {/* Status Bar */}
-      <footer className="glass-panel" style={{ padding: '10px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <Activity size={14} style={{ color: 'var(--status-healthy)' }} />
-          <span style={{ color: 'var(--text-secondary)' }}>System Status:</span>
-          <span style={{ fontWeight: 500, color: 'var(--status-healthy)', fontFamily: 'var(--font-mono)' }}>SCAFFOLD READY</span>
-        </div>
-        <div style={{ display: 'flex', gap: '16px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: '11px' }}>
-          <span>MEMORY BUDGET: 16 GB</span>
-          <span>COST: ₹0/MO</span>
-        </div>
-      </footer>
-    </div>
+        <StatusBar
+          connectionStatus={status}
+          wsLatencyMs={latencyMs}
+          dbLatencyMs={activeTelemetry?.database_latency_ms ?? null}
+          uptimeSeconds={activeTelemetry?.uptime_seconds ?? null}
+        />
+      </div>
+    </ErrorBoundary>
   );
 };
 

@@ -50,3 +50,37 @@ def test_websocket_accepts_valid_token_and_origin():
         ws.send_text(json.dumps({"action": "ping"}))
         pong_data = json.loads(ws.receive_text())
         assert pong_data["type"] == "pong"
+
+
+def test_websocket_accepts_subprotocol_auth_without_query_params():
+    """Verify WebSocket connection succeeds via Sec-WebSocket-Protocol without tokens in URL."""
+    client = TestClient(app)
+    headers = {"origin": "tauri://localhost"}
+    subprotocols = ["orbit-auth", TEST_SESSION_TOKEN]
+    with client.websocket_connect("/api/v1/ws", subprotocols=subprotocols, headers=headers) as ws:
+        init_data = json.loads(ws.receive_text())
+        assert init_data["type"] == "CONNECTION_ESTABLISHED"
+
+        # Query live telemetry
+        ws.send_text(json.dumps({"action": "get_telemetry"}))
+        telem = json.loads(ws.receive_text())
+        assert telem["type"] == "TELEMETRY_UPDATE"
+        assert "memory_rss_mb" in telem["data"]
+        assert telem["data"]["database_connected"] is True
+
+        # Query system info
+        ws.send_text(json.dumps({"action": "get_system_info"}))
+        info = json.loads(ws.receive_text())
+        assert info["type"] == "SYSTEM_INFO"
+        assert "architecture" in info["data"]
+
+
+def test_websocket_rejects_invalid_subprotocol_token():
+    """Verify WebSocket connection via Sec-WebSocket-Protocol with invalid token is rejected."""
+    client = TestClient(app)
+    headers = {"origin": "tauri://localhost"}
+    subprotocols = ["orbit-auth", "forged-token"]
+    with pytest.raises(WebSocketDisconnect) as exc_info:
+        with client.websocket_connect("/api/v1/ws", subprotocols=subprotocols, headers=headers):
+            pass
+    assert exc_info.value.code == 1008
