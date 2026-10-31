@@ -55,20 +55,33 @@ make setup
 
 This installs frontend packages via `pnpm` and provisions a local `.venv` pinned to Python 3.13 with `uv`.
 
-### 2. Run Tests
+### 2. Run Unified Verification Suite
 
 ```bash
-make test
+make verify
 ```
 
-Executes both Vitest frontend unit tests and Pytest backend async tests.
+Executes the unified 10-stage M0 verification runner (`scripts/verify_m0.sh`), validating OpenAPI contract drift, Python lint/format, clean-state SQLite migrations, pytest backend suite, frontend type safety, vitest component suite, frontend production build, and Rust clippy/tests.
 
-### 3. Run Development Servers
+### 3. Launch Native Desktop Application
 
 ```bash
-# Frontend dev server (Vite)
-pnpm --filter @orbit/frontend dev
-
-# Backend dev server (FastAPI)
-cd backend && uv run uvicorn app.main:app --reload --port 18420 --host 127.0.0.1
+pnpm tauri dev
 ```
+
+Launches the native macOS desktop shell, automatically spawning and supervising the Python backend sidecar with ephemeral loopback port allocation and secure single-use session credential handover.
+
+### 4. Run Idle Memory Benchmark
+
+```bash
+make benchmark
+```
+
+Executes `scripts/benchmark_memory.py`, reporting individual RSS and macOS physical footprint across the Rust host, WebKit WebContent, and Python backend.
+
+---
+
+## Milestone Verification & Architecture Documentation
+
+For complete verification artifacts, benchmark analysis, security audits, and lifecycle runbooks, see:
+- [`docs/M0_VERIFICATION.md`](docs/M0_VERIFICATION.md)

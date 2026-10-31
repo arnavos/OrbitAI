@@ -1,6 +1,7 @@
 """Tests verifying Alembic migrations, upgrade, and downgrade rollback."""
 
 from pathlib import Path
+
 import pytest
 from alembic import command
 from alembic.config import Config

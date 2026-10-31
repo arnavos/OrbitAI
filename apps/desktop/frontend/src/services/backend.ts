@@ -25,6 +25,8 @@ export function isTauriEnvironment(): boolean {
 export class BackendClient {
   private connection: BackendConnectionInfo | null = null;
   private isInitializing: Promise<BackendConnectionInfo | null> | null = null;
+  private connectionListeners: Array<(conn: BackendConnectionInfo) => void> = [];
+  private crashListeners: Array<(event: { reason: string; state: string }) => void> = [];
 
   /**
    * Determine if running in the native desktop container.
@@ -38,6 +40,32 @@ export class BackendClient {
    */
   getCachedConnection(): BackendConnectionInfo | null {
     return this.connection;
+  }
+
+  /**
+   * Update cached connection parameters and notify listeners.
+   */
+  setConnection(info: BackendConnectionInfo) {
+    this.connection = info;
+    this.connectionListeners.forEach((l) => l(info));
+  }
+
+  onConnectionChange(callback: (conn: BackendConnectionInfo) => void) {
+    this.connectionListeners.push(callback);
+    return () => {
+      this.connectionListeners = this.connectionListeners.filter((l) => l !== callback);
+    };
+  }
+
+  onCrash(callback: (event: { reason: string; state: string }) => void) {
+    this.crashListeners.push(callback);
+    return () => {
+      this.crashListeners = this.crashListeners.filter((l) => l !== callback);
+    };
+  }
+
+  notifyCrash(event: { reason: string; state: string }) {
+    this.crashListeners.forEach((l) => l(event));
   }
 
   /**

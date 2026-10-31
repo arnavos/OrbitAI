@@ -13,7 +13,7 @@ dev:
 	@echo "Starting development environment..."
 	pnpm dev
 
-test: test-frontend test-backend
+test: test-frontend test-backend test-rust
 
 test-frontend:
 	@echo "==> Running frontend tests (Vitest)..."
@@ -23,10 +23,23 @@ test-backend:
 	@echo "==> Running backend tests (Pytest)..."
 	cd backend && uv run pytest -v -c pyproject.toml
 
+test-rust:
+	@echo "==> Running Rust desktop tests (Cargo)..."
+	cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml
+
+verify:
+	@echo "==> Running unified M0 verification runner..."
+	bash scripts/verify_m0.sh
+
+benchmark:
+	@echo "==> Running idle memory benchmark..."
+	backend/.venv/bin/python3 scripts/benchmark_memory.py
+
 lint:
-	@echo "==> Checking TypeScript and Python linting..."
+	@echo "==> Checking TypeScript, Python, and Rust linting..."
 	pnpm --filter @orbit/frontend lint
 	cd backend && uv run ruff check .
+	cargo clippy --manifest-path apps/desktop/src-tauri/Cargo.toml -- -D warnings
 
 clean:
 	@echo "==> Cleaning build artifacts and cache..."

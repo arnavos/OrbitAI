@@ -29,17 +29,17 @@ describe('App Scaffolding & Lifecycle', () => {
     expect(screen.getByText('COST: ₹0/MO')).toBeInTheDocument();
   });
 
-  it('renders Stage 0.5 status indicator correctly', async () => {
+  it('renders Stage 0.6 status indicator correctly', async () => {
     await act(async () => {
       render(<App />);
     });
-    expect(screen.getByText(/STAGE 0.5:/)).toBeInTheDocument();
+    expect(screen.getByText(/STAGE 0.6:/)).toBeInTheDocument();
   });
 
   it('displays STANDALONE DEV when running in standard browser mode', async () => {
     await act(async () => {
       render(<App />);
     });
-    expect(screen.getByText(/STAGE 0.5: STANDALONE DEV/)).toBeInTheDocument();
+    expect(screen.getByText(/STAGE 0.6: STANDALONE DEV/)).toBeInTheDocument();
   });
 });

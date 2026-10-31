@@ -3,8 +3,9 @@
 import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.models.system import SystemSetting
 from tests.backend.conftest import test_engine
+
+from app.models.system import SystemSetting
 
 
 @pytest.mark.asyncio
@@ -40,5 +41,7 @@ async def test_transaction_rollback_on_failure(db_session: AsyncSession):
     await db_session.rollback()
 
     # Query again
-    res = await db_session.execute(text("SELECT key FROM system_settings WHERE key = 'rollback_test_key';"))
+    res = await db_session.execute(
+        text("SELECT key FROM system_settings WHERE key = 'rollback_test_key';")
+    )
     assert res.scalar_one_or_none() is None

@@ -20,6 +20,7 @@ export const Header: React.FC<HeaderProps> = ({ status, port, wsStatus }) => {
         return 'warning';
       case 'HEALTH CHECK FAILED':
       case 'INITIALIZATION TIMEOUT':
+      case 'FATAL_CRASH':
         return 'error';
       case 'STANDALONE DEV':
       default:
@@ -42,7 +43,7 @@ export const Header: React.FC<HeaderProps> = ({ status, port, wsStatus }) => {
     }
   };
 
-  const badgeText = `STAGE 0.5: ${status}${port ? ` [PORT ${port}]` : ''}`;
+  const badgeText = `STAGE 0.6: ${status}${port ? ` [PORT ${port}]` : ''}`;
 
   return (
     <header

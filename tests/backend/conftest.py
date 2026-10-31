@@ -1,12 +1,13 @@
 """Pytest test fixtures, in-memory database configuration, and async test client."""
 
 import os
-from pathlib import Path
 import sys
-from typing import AsyncGenerator
-from httpx import ASGITransport, AsyncClient
+from collections.abc import AsyncGenerator
+from pathlib import Path
+
 import pytest
 import pytest_asyncio
+from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -23,7 +24,6 @@ TEST_SESSION_TOKEN = "test-secret-token-orbit-999"
 os.environ["APP_ENV"] = "testing"
 os.environ["ORBIT_SESSION_TOKEN"] = TEST_SESSION_TOKEN
 
-from app.core.config import settings
 from app.db.base import Base
 from app.db.session import configure_sqlite_pragmas, get_db
 from app.main import app
@@ -75,15 +75,16 @@ async def setup_test_database():
 
 
 @pytest_asyncio.fixture
-async def db_session(setup_test_database) -> AsyncGenerator[AsyncSession, None]:
+async def db_session(setup_test_database) -> AsyncGenerator[AsyncSession]:
     """Provide a clean transactional session for an individual test."""
     async with TestingSessionLocal() as session:
         yield session
 
 
 @pytest_asyncio.fixture
-async def async_client(db_session: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
+async def async_client(db_session: AsyncSession) -> AsyncGenerator[AsyncClient]:
     """Provide an AsyncClient wired with the test database session and lifespan."""
+
     async def override_get_db():
         yield db_session
 

@@ -13,7 +13,9 @@
     "test": "pnpm test:frontend && pnpm test:backend",
     "lint": "pnpm --filter @orbit/frontend lint && pnpm lint:backend",
     "generate:contracts": "bash contracts/generate_types.sh",
-    "tauri": "pnpm --filter @orbit/desktop tauri"
+    "tauri": "pnpm --filter @orbit/desktop tauri",
+    "verify:m0": "bash scripts/verify_m0.sh",
+    "benchmark:memory": "backend/.venv/bin/python3 scripts/benchmark_memory.py"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.0.0",

@@ -12,7 +12,9 @@ async def test_create_and_retrieve_setting(async_client: AsyncClient, auth_heade
         "value": {"mode": "dark", "accent": "indigo"},
         "is_encrypted": False,
     }
-    post_res = await async_client.post("/api/v1/system/settings", json=payload, headers=auth_headers)
+    post_res = await async_client.post(
+        "/api/v1/system/settings", json=payload, headers=auth_headers
+    )
     assert post_res.status_code == 200
     post_data = post_res.json()["data"]
     assert post_data["key"] == "ui.theme"
@@ -37,7 +39,9 @@ async def test_setting_not_found(async_client: AsyncClient, auth_headers: dict[s
 
 
 @pytest.mark.asyncio
-async def test_setting_update_logs_audit_event(async_client: AsyncClient, auth_headers: dict[str, str]):
+async def test_setting_update_logs_audit_event(
+    async_client: AsyncClient, auth_headers: dict[str, str]
+):
     """Verify that updating a setting automatically appends an audit event."""
     payload = {"key": "network.proxy", "value": "direct", "is_encrypted": False}
     await async_client.post("/api/v1/system/settings", json=payload, headers=auth_headers)
@@ -47,5 +51,8 @@ async def test_setting_update_logs_audit_event(async_client: AsyncClient, auth_h
     events = audit_res.json()["data"]
 
     # Locate the SETTING_UPDATED event
-    found = any(e["event_type"] == "SETTING_UPDATED" and e["payload"].get("key") == "network.proxy" for e in events)
+    found = any(
+        e["event_type"] == "SETTING_UPDATED" and e["payload"].get("key") == "network.proxy"
+        for e in events
+    )
     assert found is True, "Audit log must contain SETTING_UPDATED event"

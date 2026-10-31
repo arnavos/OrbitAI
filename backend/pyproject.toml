@@ -40,6 +40,10 @@ target-version = "py313"
 select = ["E", "F", "I", "UP", "B", "SIM"]
 ignore = ["B008"]
 
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["E501", "SIM117", "E402", "SIM105"]
+"../tests/**" = ["E501", "SIM117", "E402", "SIM105"]
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"

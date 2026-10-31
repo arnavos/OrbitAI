@@ -1,0 +1,31 @@
+{
+  "success": true,
+  "within_target": false,
+  "target_mb": 150.0,
+  "total_rss_mb": 217.28,
+  "total_phys_mb": 189.75,
+  "components": {
+    "rust_host": {
+      "pids": [
+        22841
+      ],
+      "rss_mb": 86.22,
+      "phys_mb": 33.0
+    },
+    "python_backend": {
+      "pids": [
+        22876
+      ],
+      "rss_mb": 40.03,
+      "phys_mb": 62.0
+    },
+    "webkit": {
+      "pids": [
+        22874,
+        22875
+      ],
+      "rss_mb": 91.03,
+      "phys_mb": 94.75
+    }
+  }
+}

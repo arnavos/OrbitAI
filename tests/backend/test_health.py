@@ -31,7 +31,9 @@ async def test_detailed_health_requires_auth(async_client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_detailed_health_with_valid_auth(async_client: AsyncClient, auth_headers: dict[str, str]):
+async def test_detailed_health_with_valid_auth(
+    async_client: AsyncClient, auth_headers: dict[str, str]
+):
     """Verify that authenticated GET /api/v1/health/detailed returns resource metrics and WAL diagnostics."""
     response = await async_client.get("/api/v1/health/detailed", headers=auth_headers)
     assert response.status_code == 200

@@ -31,7 +31,9 @@ async def test_endpoint_rejects_invalid_token(async_client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_endpoint_accepts_valid_token(async_client: AsyncClient, auth_headers: dict[str, str]):
+async def test_endpoint_accepts_valid_token(
+    async_client: AsyncClient, auth_headers: dict[str, str]
+):
     """Verify a valid session token grants access."""
     response = await async_client.get("/api/v1/system/info", headers=auth_headers)
     assert response.status_code == 200

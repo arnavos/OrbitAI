@@ -174,3 +174,9 @@ export class WebSocketClient {
 }
 
 export const webSocketClient = new WebSocketClient();
+
+// Reconnect WebSocket automatically when backend restarts on a fresh port and token
+backendClient.onConnectionChange(() => {
+  webSocketClient.disconnect();
+  webSocketClient.connect();
+});

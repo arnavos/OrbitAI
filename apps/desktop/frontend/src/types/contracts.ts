@@ -23,7 +23,8 @@ export type ConnectionStatus =
   | 'RECONNECTING'
   | 'HEALTH CHECK FAILED'
   | 'INITIALIZATION TIMEOUT'
-  | 'DISCONNECTED';
+  | 'DISCONNECTED'
+  | 'FATAL_CRASH';
 
 export interface TelemetryEvent {
   type: 'TELEMETRY_UPDATE';

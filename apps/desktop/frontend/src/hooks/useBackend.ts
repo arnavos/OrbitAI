@@ -17,6 +17,8 @@ export function useBackend(): UseBackendState {
 
   useEffect(() => {
     let isMounted = true;
+    let unlistenRestart: (() => void) | undefined;
+    let unlistenCrash: (() => void) | undefined;
 
     async function init() {
       if (!backendClient.isDesktop()) {
@@ -62,11 +64,60 @@ export function useBackend(): UseBackendState {
           setStatus('HEALTH CHECK FAILED');
         }
       }
+
+      // Register desktop event listeners for automatic crash recovery and fatal crash
+      try {
+        const { listen } = await import('@tauri-apps/api/event');
+        if (!isMounted) return;
+
+        const restartCleanup = await listen<BackendConnectionInfo>(
+          'orbit://backend-restarted',
+          async (event) => {
+            console.log('[Orbit Frontend] Backend restart detected:', event.payload);
+            backendClient.setConnection(event.payload);
+            if (!isMounted) return;
+
+            setConnection(event.payload);
+            try {
+              const parsed = new URL(event.payload.apiUrl);
+              setPort(parsed.port);
+            } catch {
+              // ignore
+            }
+
+            try {
+              const h = await backendClient.checkHealth();
+              if (isMounted && h && h.status === 'healthy') {
+                setHealth(h);
+                setStatus('CONNECTED');
+              }
+            } catch {
+              if (isMounted) setStatus('HEALTH CHECK FAILED');
+            }
+          }
+        );
+        unlistenRestart = restartCleanup;
+
+        const crashCleanup = await listen<{ reason: string; state: string }>(
+          'orbit://backend-crashed',
+          (event) => {
+            console.error('[Orbit Frontend] Backend fatal crash:', event.payload);
+            if (isMounted) {
+              setStatus('FATAL_CRASH');
+            }
+          }
+        );
+        unlistenCrash = crashCleanup;
+      } catch {
+        // Not in Tauri or event API unavailable
+      }
     }
 
     init();
     return () => {
       isMounted = false;
+      if (unlistenRestart) unlistenRestart();
+      if (unlistenCrash) unlistenCrash();
     };
   }, []);
 

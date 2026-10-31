@@ -32,7 +32,9 @@ async def test_envelope_structure_on_auth_failure(async_client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_envelope_structure_on_not_found(async_client: AsyncClient, auth_headers: dict[str, str]):
+async def test_envelope_structure_on_not_found(
+    async_client: AsyncClient, auth_headers: dict[str, str]
+):
     """Verify 404 error envelope format."""
     res = await async_client.get("/api/v1/system/settings/unknown_xyz", headers=auth_headers)
     payload = res.json()
@@ -43,7 +45,9 @@ async def test_envelope_structure_on_not_found(async_client: AsyncClient, auth_h
 
 
 @pytest.mark.asyncio
-async def test_envelope_structure_on_validation_error(async_client: AsyncClient, auth_headers: dict[str, str]):
+async def test_envelope_structure_on_validation_error(
+    async_client: AsyncClient, auth_headers: dict[str, str]
+):
     """Verify 422 validation error envelope format."""
     # Send empty body to a POST route requiring SystemSettingCreate
     res = await async_client.post("/api/v1/system/settings", json={}, headers=auth_headers)

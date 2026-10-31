@@ -4,6 +4,7 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.models.system import AuditEvent
 
 
@@ -108,9 +109,7 @@ async def test_audit_event_database_trigger_blocks_raw_sql_delete(db_session: As
 
     # Attempt direct raw SQL DELETE
     with pytest.raises(DBAPIError) as exc_info:
-        await db_session.execute(
-            text(f"DELETE FROM audit_events WHERE id = {event.id};")
-        )
+        await db_session.execute(text(f"DELETE FROM audit_events WHERE id = {event.id};"))
         await db_session.commit()
 
     assert "audit_events table is append-only: deletions are prohibited" in str(exc_info.value)
