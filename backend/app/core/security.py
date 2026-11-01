@@ -30,14 +30,14 @@ def is_origin_allowed(origin: str | None) -> bool:
 
 
 def verify_session_token(token: str | None) -> bool:
-    """Verify session token using constant-time comparison to prevent timing attacks."""
+    """Verify session token using constant-time comparison to prevent timing attacks.
+
+    Fails closed if either expected_token or incoming token is missing or empty.
+    Zero bypasses permitted regardless of APP_ENV.
+    """
     expected_token = settings.session_token
 
-    # If no token is configured in environment, require explicit configuration in non-testing
-    if not expected_token:
-        return settings.app_env == "testing"
-
-    if not token:
+    if not expected_token or not token:
         return False
 
     return hmac.compare_digest(token.encode("utf-8"), expected_token.encode("utf-8"))

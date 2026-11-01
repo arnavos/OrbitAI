@@ -179,88 +179,109 @@ impl SidecarSupervisor {
                 cleanup_token_file(&old.token_file);
             }
 
-            // Check restart throttling: max 3 attempts within 10 seconds
-            let mut history = self.restart_history.lock().await;
-            let now = Instant::now();
-            history.retain(|t| now.duration_since(*t) < Duration::from_secs(10));
+            // Inner recovery loop: attempt to start and verify a replacement backend
+            let mut recovered_child: Option<Child> = None;
 
-            if history.len() >= 3 {
-                *self.state.lock().await = SupervisorState::FatalCrash;
-                let crash_event = BackendCrashEvent {
-                    exit_code,
-                    reason: "Exceeded maximum 3 restart attempts within 10 seconds (Throttled)"
-                        .to_string(),
-                    restart_count: history.len(),
-                    state: SupervisorState::FatalCrash,
-                };
+            while !self.is_shutting_down.load(Ordering::SeqCst) {
+                // Check restart throttling: max 3 attempts within 10 seconds
+                let mut history = self.restart_history.lock().await;
+                let now = Instant::now();
+                history.retain(|t| now.duration_since(*t) < Duration::from_secs(10));
 
-                eprintln!("[Orbit Desktop] FATAL CRASH: Subprocess entered unrecoverable state");
-
-                if let Some(handle) = self.app_handle.lock().await.as_ref() {
-                    let _ = handle.emit("orbit://backend-crashed", &crash_event);
-                }
-                break;
-            }
-
-            // Throttled exponential backoff: 300ms, 600ms, 900ms
-            history.push(now);
-            let attempt = history.len();
-            let backoff_ms = 300 * (attempt as u64);
-            drop(history);
-
-            *self.state.lock().await = SupervisorState::Restarting;
-            eprintln!(
-                "[Orbit Desktop] Attempting recovery restart #{} in {}ms...",
-                attempt, backoff_ms
-            );
-            tokio::time::sleep(Duration::from_millis(backoff_ms)).await;
-
-            if self.is_shutting_down.load(Ordering::SeqCst) {
-                break;
-            }
-
-            // Allocate fresh port and session token
-            let new_port = match find_available_port() {
-                Ok(p) => p,
-                Err(e) => {
-                    eprintln!(
-                        "[Orbit Desktop] Failed to allocate port for recovery: {}",
-                        e
-                    );
-                    continue;
-                }
-            };
-
-            let new_token = generate_session_token();
-
-            match spawn_and_verify_backend(new_port, &new_token).await {
-                Ok((new_child, new_active)) => {
-                    let new_conn = BackendConnectionInfo {
-                        api_url: format!("http://127.0.0.1:{}", new_port),
-                        ws_url: format!("ws://127.0.0.1:{}/api/v1/ws", new_port),
-                        session_token: new_token,
+                if history.len() >= 3 {
+                    *self.state.lock().await = SupervisorState::FatalCrash;
+                    let crash_event = BackendCrashEvent {
+                        exit_code,
+                        reason: "Exceeded maximum 3 restart attempts within 10 seconds (Throttled)"
+                            .to_string(),
+                        restart_count: history.len(),
+                        state: SupervisorState::FatalCrash,
                     };
 
-                    *self.connection_info.lock().await = Some(new_conn.clone());
-                    *self.active_backend.lock().await = Some(new_active);
-                    *self.state.lock().await = SupervisorState::Running;
-
                     eprintln!(
-                        "[Orbit Desktop] Backend successfully recovered on port {}",
-                        new_port
+                        "[Orbit Desktop] FATAL CRASH: Subprocess entered unrecoverable state"
                     );
 
                     if let Some(handle) = self.app_handle.lock().await.as_ref() {
-                        let _ = handle.emit("orbit://backend-restarted", &new_conn);
+                        let _ = handle.emit("orbit://backend-crashed", &crash_event);
                     }
-
-                    current_child = new_child;
+                    break;
                 }
-                Err(e) => {
-                    eprintln!(
-                        "[Orbit Desktop] Recovery attempt failed to start backend: {}",
-                        e
-                    );
+
+                // Throttled exponential backoff: 300ms, 600ms, 900ms
+                history.push(now);
+                let attempt = history.len();
+                let backoff_ms = 300 * (attempt as u64);
+                drop(history);
+
+                *self.state.lock().await = SupervisorState::Restarting;
+                eprintln!(
+                    "[Orbit Desktop] Attempting recovery restart #{} in {}ms...",
+                    attempt, backoff_ms
+                );
+                tokio::time::sleep(Duration::from_millis(backoff_ms)).await;
+
+                if self.is_shutting_down.load(Ordering::SeqCst) {
+                    break;
+                }
+
+                // Allocate fresh port and session token
+                let new_port = match find_available_port() {
+                    Ok(p) => p,
+                    Err(e) => {
+                        eprintln!(
+                            "[Orbit Desktop] Failed to allocate port for recovery: {}",
+                            e
+                        );
+                        continue;
+                    }
+                };
+
+                let new_token = generate_session_token();
+
+                match spawn_and_verify_backend(new_port, &new_token).await {
+                    Ok((new_child, new_active)) => {
+                        let new_conn = BackendConnectionInfo {
+                            api_url: format!("http://127.0.0.1:{}", new_port),
+                            ws_url: format!("ws://127.0.0.1:{}/api/v1/ws", new_port),
+                            session_token: new_token,
+                        };
+
+                        *self.connection_info.lock().await = Some(new_conn.clone());
+                        *self.active_backend.lock().await = Some(new_active);
+                        *self.state.lock().await = SupervisorState::Running;
+
+                        eprintln!(
+                            "[Orbit Desktop] Backend successfully recovered on port {}",
+                            new_port
+                        );
+
+                        if let Some(handle) = self.app_handle.lock().await.as_ref() {
+                            let _ = handle.emit("orbit://backend-restarted", &new_conn);
+                        }
+
+                        recovered_child = Some(new_child);
+                        break;
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "[Orbit Desktop] Recovery attempt #{} failed to start backend: {}",
+                            attempt, e
+                        );
+                        if let Some(old) = self.active_backend.lock().await.take() {
+                            cleanup_token_file(&old.token_file);
+                        }
+                    }
+                }
+            }
+
+            match recovered_child {
+                Some(child) => {
+                    current_child = child;
+                }
+                None => {
+                    // Fatal crash entered or shutting down
+                    break;
                 }
             }
         }
@@ -370,51 +391,116 @@ pub fn cleanup_token_file(path: &Path) {
     }
 }
 
+/// Helper to generate candidate directory roots by traversing up from CWD and the current executable.
+fn get_search_roots() -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+
+    // 1. Current working directory and ancestors
+    if let Ok(cwd) = std::env::current_dir() {
+        let mut cur = Some(cwd.as_path());
+        while let Some(dir) = cur {
+            roots.push(dir.to_path_buf());
+            cur = dir.parent();
+        }
+    }
+
+    // 2. Directory containing current executable and ancestors
+    if let Ok(exe_path) = std::env::current_exe() {
+        let mut cur = exe_path.parent();
+        while let Some(dir) = cur {
+            roots.push(dir.to_path_buf());
+            cur = dir.parent();
+        }
+    }
+
+    roots
+}
+
 /// Locate the Python interpreter inside the local project virtual environment.
 pub fn find_python_interpreter() -> Result<PathBuf, String> {
-    let candidates = [
-        PathBuf::from("backend/.venv/bin/python3"),
-        PathBuf::from("../../backend/.venv/bin/python3"),
-        PathBuf::from("../backend/.venv/bin/python3"),
-        PathBuf::from("/Users/arnav/Desktop/OrbitAI/backend/.venv/bin/python3"),
-    ];
+    if let Ok(override_path) = std::env::var("ORBIT_PYTHON_PATH") {
+        let p = PathBuf::from(override_path);
+        if p.exists() {
+            return Ok(p);
+        } else {
+            return Err(format!(
+                "Configured ORBIT_PYTHON_PATH does not exist: {:?}",
+                p
+            ));
+        }
+    }
 
-    for path in &candidates {
-        if path.exists() {
-            if let Some(parent) = path.parent() {
+    // Try finding backend directory first and inspect its .venv/bin/python3
+    if let Ok(backend_dir) = find_backend_dir() {
+        let venv_python = backend_dir.join(".venv").join("bin").join("python3");
+        if venv_python.exists() {
+            if let Some(parent) = venv_python.parent() {
                 if let Ok(canon_dir) = parent.canonicalize() {
                     return Ok(canon_dir.join("python3"));
                 }
             }
-            return Ok(path.clone());
+            return Ok(venv_python);
         }
     }
 
+    // Search through candidate directory roots
+    for root in get_search_roots() {
+        let candidate = root
+            .join("backend")
+            .join(".venv")
+            .join("bin")
+            .join("python3");
+        if candidate.exists() {
+            if let Some(parent) = candidate.parent() {
+                if let Ok(canon_dir) = parent.canonicalize() {
+                    return Ok(canon_dir.join("python3"));
+                }
+            }
+            return Ok(candidate);
+        }
+    }
+
+    // Standard macOS Framework fallback if virtualenv is not yet initialized
     let fallback =
         PathBuf::from("/Library/Frameworks/Python.framework/Versions/3.13/bin/python3.13");
     if fallback.exists() {
         return Ok(fallback);
     }
 
-    Err("Could not find a valid Python 3.13 interpreter in backend/.venv".to_string())
+    Err(
+        "Could not find a valid Python 3.13 interpreter in backend/.venv or system paths. Run 'make setup' to initialize the virtual environment or set ORBIT_PYTHON_PATH."
+            .to_string(),
+    )
 }
 
 /// Resolve the backend directory path containing the FastAPI app.
 pub fn find_backend_dir() -> Result<PathBuf, String> {
-    let candidates = [
-        PathBuf::from("backend"),
-        PathBuf::from("../../backend"),
-        PathBuf::from("../backend"),
-        PathBuf::from("/Users/arnav/Desktop/OrbitAI/backend"),
-    ];
-
-    for path in &candidates {
-        if path.join("app").join("main.py").exists() {
-            return Ok(path.canonicalize().unwrap_or_else(|_| path.clone()));
+    if let Ok(override_dir) = std::env::var("ORBIT_BACKEND_DIR") {
+        let p = PathBuf::from(override_dir);
+        if p.join("app").join("main.py").exists() {
+            return Ok(p.canonicalize().unwrap_or(p));
+        } else {
+            return Err(format!(
+                "Configured ORBIT_BACKEND_DIR does not contain app/main.py: {:?}",
+                p
+            ));
         }
     }
 
-    Err("Could not locate backend directory containing app/main.py".to_string())
+    for root in get_search_roots() {
+        let candidate = root.join("backend");
+        if candidate.join("app").join("main.py").exists() {
+            return Ok(candidate.canonicalize().unwrap_or(candidate));
+        }
+        if root.join("app").join("main.py").exists() {
+            return Ok(root.canonicalize().unwrap_or(root));
+        }
+    }
+
+    Err(
+        "Could not locate backend directory containing app/main.py. Ensure ORBIT is run from the project repository or set ORBIT_BACKEND_DIR."
+            .to_string(),
+    )
 }
 
 /// Asynchronously probe the backend health endpoint until it returns HTTP 200 OK.
@@ -705,6 +791,49 @@ mod tests {
         );
 
         // Clean shutdown
+        supervisor.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn test_supervisor_recovery_handles_repeated_spawn_failures() {
+        let conn_info = Arc::new(Mutex::new(None));
+        let supervisor = SidecarSupervisor::new(Arc::clone(&conn_info));
+
+        // Spawn a short-lived process as initial child that exits immediately
+        let child = Command::new("/bin/sh")
+            .arg("-c")
+            .arg("exit 1")
+            .spawn()
+            .expect("should spawn dummy exiting child");
+
+        // Set invalid python path so that recovery restart attempts fail to spawn
+        std::env::set_var("ORBIT_PYTHON_PATH", "/nonexistent/invalid/python_bin");
+
+        // Spawn supervision loop in background task
+        let supervisor_clone = Arc::clone(&supervisor);
+        tokio::spawn(async move {
+            supervisor_clone.run_supervision_loop(child).await;
+        });
+
+        // Await supervisor entering FatalCrash state
+        let mut fatal = false;
+        for _ in 0..60 {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            let state = supervisor.state.lock().await;
+            if *state == SupervisorState::FatalCrash {
+                fatal = true;
+                break;
+            }
+        }
+
+        // Clean up environment variable
+        std::env::remove_var("ORBIT_PYTHON_PATH");
+
+        assert!(
+            fatal,
+            "Supervisor must transition to FatalCrash after repeated spawn failures during recovery"
+        );
+
         supervisor.shutdown().await;
     }
 }

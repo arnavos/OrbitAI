@@ -3,6 +3,9 @@
 import pytest
 from httpx import AsyncClient
 
+from app.core.config import settings
+from app.core.security import verify_session_token
+
 
 @pytest.mark.asyncio
 async def test_endpoint_rejects_missing_token(async_client: AsyncClient):
@@ -77,3 +80,30 @@ async def test_origin_validation_permits_tauri_and_local_origins(
         headers = {**auth_headers, "origin": origin}
         response = await async_client.get("/api/v1/system/info", headers=headers)
         assert response.status_code == 200, f"Origin '{origin}' should be authorized."
+
+
+@pytest.mark.asyncio
+async def test_app_env_testing_without_credentials_fails_closed(
+    async_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+):
+    """Regression test: verify APP_ENV=testing without credentials fails closed."""
+    # 1. Direct function check: missing expected_token must fail closed
+    monkeypatch.setattr(settings, "session_token", None)
+    monkeypatch.setattr(settings, "app_env", "testing")
+
+    assert verify_session_token("any-token") is False
+    assert verify_session_token(None) is False
+    assert verify_session_token("") is False
+
+    # 2. HTTP endpoint check: missing expected token in settings must reject requests with 401
+    response = await async_client.get(
+        "/api/v1/system/info", headers={"x-orbit-session-token": "any-token"}
+    )
+    assert response.status_code == 401
+    payload = response.json()
+    assert payload["success"] is False
+    assert payload["error"]["code"] == "AUTHENTICATION_FAILED"
+
+    # 3. HTTP endpoint check without header must also reject with 401
+    response_no_header = await async_client.get("/api/v1/system/info")
+    assert response_no_header.status_code == 401

@@ -52,6 +52,75 @@ def test_empty_token_file_rejected(tmp_path: Path):
         Settings(ORBIT_SESSION_TOKEN_FILE=str(token_file), app_env="testing")
 
 
+def test_missing_token_file_rejected(tmp_path: Path):
+    """Verify that non-existent token files fail closed."""
+    missing_file = tmp_path / "non_existent.token"
+    with pytest.raises(ValueError, match="not found"):
+        Settings(ORBIT_SESSION_TOKEN_FILE=str(missing_file), app_env="testing")
+
+
+def test_non_regular_file_rejected(tmp_path: Path):
+    """Verify that non-regular files (e.g. directories) are rejected."""
+    dir_as_file = tmp_path / "dir_token"
+    dir_as_file.mkdir()
+    os.chmod(dir_as_file, 0o600)
+
+    with pytest.raises(ValueError, match="is not a regular file"):
+        Settings(ORBIT_SESSION_TOKEN_FILE=str(dir_as_file), app_env="testing")
+
+
+def test_wrong_ownership_rejected(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Verify that token files owned by another UID are rejected."""
+    token_file = tmp_path / "wrong_owner.token"
+    token_file.write_text("valid-token-secret-12345", encoding="utf-8")
+    os.chmod(token_file, 0o600)
+
+    real_fstat = os.fstat
+
+    def fake_fstat(fd: int) -> os.stat_result:
+        st = real_fstat(fd)
+        return os.stat_result(
+            (
+                st.st_mode,
+                st.st_ino,
+                st.st_dev,
+                st.st_nlink,
+                st.st_uid + 9999,  # Spoof wrong UID
+                st.st_gid,
+                st.st_size,
+                st.st_atime,
+                st.st_mtime,
+                st.st_ctime,
+            )
+        )
+
+    monkeypatch.setattr(os, "fstat", fake_fstat)
+
+    with pytest.raises(ValueError, match="does not match current UID"):
+        Settings(ORBIT_SESSION_TOKEN_FILE=str(token_file), app_env="testing")
+
+
+def test_error_path_descriptor_cleanup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Verify that file descriptors are always closed when validation fails."""
+    token_file = tmp_path / "unclosed_check.token"
+    token_file.write_text("secret", encoding="utf-8")
+    os.chmod(token_file, 0o644)  # Trigger permission failure
+
+    closed_fds: list[int] = []
+    real_close = os.close
+
+    def tracking_close(fd: int) -> None:
+        closed_fds.append(fd)
+        real_close(fd)
+
+    monkeypatch.setattr(os, "close", tracking_close)
+
+    with pytest.raises(ValueError, match="must be strictly 0600"):
+        Settings(ORBIT_SESSION_TOKEN_FILE=str(token_file), app_env="testing")
+
+    assert len(closed_fds) > 0, "Descriptor must be closed on validation failure in error path"
+
+
 def token_path_exists(p: Path) -> bool:
     try:
         p.stat()

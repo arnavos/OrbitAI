@@ -1,5 +1,6 @@
 """Application configuration management using Pydantic Settings."""
 
+import errno
 import os
 import stat
 from pathlib import Path
@@ -76,46 +77,80 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def consume_token_file(self) -> Self:
-        """Read session token from secure 0600 file if provided, validate, and unlink."""
+        """Read session token from secure 0600 file using file-descriptor validation, and unlink."""
         if not self.session_token_file:
             return self
 
         import contextlib
 
-        token_path = Path(self.session_token_file)
-        if token_path.is_symlink():
-            raise ValueError("Security violation: Session token file cannot be a symbolic link.")
+        token_file = self.session_token_file
+        flags = os.O_RDONLY
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
 
-        if not token_path.is_file():
-            msg = f"Security violation: Token file '{token_path}' is not a regular file."
-            raise ValueError(msg)
+        fd: int | None = None
+        try:
+            try:
+                fd = os.open(token_file, flags)
+            except OSError as err:
+                if err.errno == errno.ELOOP or (
+                    hasattr(errno, "EMLINK") and err.errno == errno.EMLINK
+                ):
+                    msg = (
+                        "Security violation: Session token file cannot be a symbolic link: "
+                        f"'{token_file}'"
+                    )
+                    raise ValueError(msg) from err
+                if err.errno == errno.ENOENT:
+                    raise ValueError(
+                        f"Security violation: Token file '{token_file}' not found."
+                    ) from err
+                raise ValueError(
+                    f"Security violation: Failed to open token file '{token_file}': {err}"
+                ) from err
 
-        file_stat = token_path.stat()
+            file_stat = os.fstat(fd)
 
-        # POSIX ownership validation
-        if hasattr(os, "getuid") and file_stat.st_uid != os.getuid():
-            msg = (
-                f"Security violation: Token file owner ({file_stat.st_uid}) "
-                f"does not match current UID ({os.getuid()})."
-            )
-            raise ValueError(msg)
+            # 1. Verify regular file type (reject directories, FIFOs, sockets, device nodes)
+            if not stat.S_ISREG(file_stat.st_mode):
+                raise ValueError(
+                    f"Security violation: Token file '{token_file}' is not a regular file."
+                )
 
-        # POSIX permission validation (strictly 0600: read/write by owner only)
-        file_mode = stat.S_IMODE(file_stat.st_mode)
-        if file_mode != 0o600:
-            msg = f"Security violation: Token permissions ({oct(file_mode)}) must be strictly 0600."
-            raise ValueError(msg)
+            # 2. POSIX ownership validation
+            if hasattr(os, "getuid") and file_stat.st_uid != os.getuid():
+                raise ValueError(
+                    f"Security violation: Token file owner ({file_stat.st_uid}) "
+                    f"does not match current UID ({os.getuid()})."
+                )
 
-        # Read token value securely
-        token_value = token_path.read_text(encoding="utf-8").strip()
-        if not token_value:
-            raise ValueError("Security violation: Session token file is empty.")
+            # 3. POSIX permission validation (strictly 0600: read/write by owner only)
+            file_mode = stat.S_IMODE(file_stat.st_mode)
+            if file_mode != 0o600:
+                msg = (
+                    f"Security violation: Token permissions ({oct(file_mode)}) "
+                    "must be strictly 0600."
+                )
+                raise ValueError(msg)
 
-        self.session_token = token_value
+            # 4. Read token value securely through validated descriptor
+            with os.fdopen(fd, "r", encoding="utf-8") as f:
+                fd = None  # os.fdopen takes ownership of closing descriptor
+                token_value = f.read().strip()
 
-        # Immediately unlink file from disk to eliminate persisted credentials
-        with contextlib.suppress(OSError):
-            token_path.unlink()
+            if not token_value:
+                raise ValueError("Security violation: Session token file is empty.")
+
+            self.session_token = token_value
+
+            # 5. Immediately unlink file from disk to eliminate persisted credentials
+            with contextlib.suppress(OSError):
+                os.unlink(token_file)
+
+        finally:
+            if fd is not None:
+                with contextlib.suppress(OSError):
+                    os.close(fd)
 
         return self
 
