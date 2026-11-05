@@ -212,6 +212,35 @@ def test_model_descriptor_invalid_context_capacity():
         )
 
 
+def test_model_descriptor_context_capacity_optional():
+    """Verify context_window_capacity is optional and safely defaults to None without fabrication."""
+    # Omitted -> defaults to None
+    d1 = ModelDescriptor(
+        id="mock/model-no-context",
+        name="Model Without Context",
+        provider_type=ProviderType.MOCK,
+    )
+    assert d1.context_window_capacity is None
+
+    # Explicit None -> preserved as None
+    d2 = ModelDescriptor(
+        id="mock/model-explicit-none",
+        name="Model Explicit None Context",
+        provider_type=ProviderType.MOCK,
+        context_window_capacity=None,
+    )
+    assert d2.context_window_capacity is None
+
+    # Explicit valid integer -> preserved
+    d3 = ModelDescriptor(
+        id="mock/model-explicit-int",
+        name="Model Explicit Context",
+        provider_type=ProviderType.MOCK,
+        context_window_capacity=131072,
+    )
+    assert d3.context_window_capacity == 131072
+
+
 def test_model_descriptor_invalid_memory_bytes():
     """Verify negative estimated_memory_bytes is rejected."""
     with pytest.raises(ValidationError, match="greater than or equal to 0"):

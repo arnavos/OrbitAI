@@ -14,6 +14,7 @@ from app.ai.exceptions import (
     UnsupportedCapabilityError,
 )
 from app.ai.provider import ModelProvider
+from app.ai.providers import OllamaProvider
 from app.ai.registry import DiscoveryResult, ModelRegistry
 from app.ai.types import (
     ChatMessage,
@@ -52,6 +53,7 @@ __all__ = [
     "ModelNotFoundError",
     "ModelProvider",
     "ModelRegistry",
+    "OllamaProvider",
     "ProviderHealth",
     "ProviderNotFoundError",
     "ProviderStatus",

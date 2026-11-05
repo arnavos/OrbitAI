@@ -204,7 +204,9 @@ class ModelDescriptor(BaseModel):
     quantization: str | None = Field(
         default=None, description="Quantization scheme (e.g. 'Q4_K_M')"
     )
-    context_window_capacity: int = Field(..., gt=0, description="Maximum context window in tokens")
+    context_window_capacity: int | None = Field(
+        default=None, gt=0, description="Verified maximum context window in tokens if known"
+    )
     estimated_memory_bytes: int | None = Field(
         default=None, ge=0, description="Estimated unified memory requirement in bytes"
     )

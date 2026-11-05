@@ -1,8 +1,10 @@
 """Application configuration management using Pydantic Settings."""
 
 import errno
+import ipaddress
 import os
 import stat
+import urllib.parse
 from pathlib import Path
 from typing import Literal, Self
 
@@ -65,6 +67,36 @@ class Settings(BaseSettings):
     )
     log_level: str = "INFO"
 
+    # AI & Local Inference Providers (Ollama)
+    ollama_base_url: str = Field(
+        default="http://127.0.0.1:11434",
+        validation_alias="ORBIT_OLLAMA_BASE_URL",
+        description="Base URL for local Ollama daemon (strictly loopback)",
+    )
+    ollama_connect_timeout: float = Field(
+        default=3.0,
+        gt=0.0,
+        validation_alias="ORBIT_OLLAMA_CONNECT_TIMEOUT",
+        description="TCP socket connection timeout in seconds",
+    )
+    ollama_read_timeout: float = Field(
+        default=60.0,
+        gt=0.0,
+        validation_alias="ORBIT_OLLAMA_READ_TIMEOUT",
+        description="Read timeout for model loading and first token generation in seconds",
+    )
+    ollama_inter_token_timeout: float = Field(
+        default=15.0,
+        gt=0.0,
+        validation_alias="ORBIT_OLLAMA_INTER_TOKEN_TIMEOUT",
+        description="Maximum idle duration between streaming token chunks in seconds",
+    )
+    ollama_keep_alive: str = Field(
+        default="5m",
+        validation_alias="ORBIT_OLLAMA_KEEP_ALIVE",
+        description="Model memory residency duration in Ollama daemon (e.g. '5m', '0')",
+    )
+
     @field_validator("host")
     @classmethod
     def validate_loopback_only(cls, v: str) -> str:
@@ -74,6 +106,103 @@ class Settings(BaseSettings):
                 f"Security violation: Binding to non-loopback host '{v}' is prohibited."
             )
         return v
+
+    @field_validator("ollama_base_url")
+    @classmethod
+    def validate_ollama_base_url(cls, v: str) -> str:
+        """Validate and normalize Ollama base URL strictly to loopback endpoints."""
+        raw = v.strip()
+        if not raw:
+            raise ValueError("Ollama base URL cannot be empty.")
+
+        try:
+            parsed = urllib.parse.urlsplit(raw)
+        except Exception as err:
+            raise ValueError(f"Security violation: Malformed Ollama URL '{raw}': {err}") from err
+
+        scheme = parsed.scheme.lower()
+        if scheme not in ("http", "https"):
+            raise ValueError(
+                f"Security violation: Invalid scheme '{scheme}'. "
+                "Only 'http' and 'https' are permitted."
+            )
+
+        if parsed.username is not None or parsed.password is not None:
+            raise ValueError(
+                "Security violation: Embedded credentials in Ollama URL are prohibited."
+            )
+
+        # Reject custom path (must be empty or "/")
+        if parsed.path and parsed.path.rstrip("/") != "":
+            raise ValueError(
+                f"Security violation: Custom URL path '{parsed.path}' is prohibited; "
+                "must point to daemon root."
+            )
+
+        if parsed.query:
+            raise ValueError("Security violation: Query strings in Ollama URL are prohibited.")
+
+        if parsed.fragment:
+            raise ValueError("Security violation: URL fragments in Ollama URL are prohibited.")
+
+        hostname = parsed.hostname
+        if not hostname:
+            raise ValueError("Security violation: Missing hostname in Ollama URL.")
+
+        try:
+            port = parsed.port
+        except ValueError as err:
+            raise ValueError(f"Security violation: Malformed port in Ollama URL: {err}") from err
+
+        if port is not None and not (1 <= port <= 65535):
+            raise ValueError(f"Security violation: Port '{port}' out of valid range (1-65535).")
+
+        normalized_host = hostname.lower()
+        is_loopback = False
+
+        if normalized_host == "localhost":
+            normalized_host = "127.0.0.1"
+            is_loopback = True
+        else:
+            try:
+                ip = ipaddress.ip_address(normalized_host)
+                if ip.is_loopback:
+                    is_loopback = True
+            except ValueError:
+                is_loopback = False
+
+        if not is_loopback:
+            raise ValueError(
+                f"Security violation: Host '{hostname}' is not a valid loopback address. "
+                "Only local loopback endpoints (127.0.0.1, [::1], localhost) are permitted."
+            )
+
+        port_str = f":{port}" if port is not None else ""
+        if ":" in normalized_host and not normalized_host.startswith("["):
+            normalized_host = f"[{normalized_host}]"
+
+        return f"{scheme}://{normalized_host}{port_str}"
+
+    @field_validator(
+        "ollama_connect_timeout",
+        "ollama_read_timeout",
+        "ollama_inter_token_timeout",
+    )
+    @classmethod
+    def validate_positive_timeout(cls, v: float) -> float:
+        """Validate timeout values are strictly positive numbers."""
+        if v <= 0:
+            raise ValueError("Timeout must be a strictly positive number.")
+        return v
+
+    @field_validator("ollama_keep_alive")
+    @classmethod
+    def validate_ollama_keep_alive(cls, v: str) -> str:
+        """Validate keep_alive duration string is non-empty."""
+        cleaned = v.strip()
+        if not cleaned:
+            raise ValueError("Ollama keep_alive setting cannot be empty.")
+        return cleaned
 
     @model_validator(mode="after")
     def consume_token_file(self) -> Self:

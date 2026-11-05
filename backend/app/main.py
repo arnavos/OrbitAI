@@ -11,6 +11,9 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from app.ai.providers import OllamaProvider
+from app.ai.registry import ModelRegistry
+from app.ai.types import ProviderStatus
 from app.api.router import api_router
 from app.core.config import settings
 from app.core.errors import (
@@ -98,9 +101,41 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
         logger.error(f"Fatal error during database initialization: {e}")
         raise
 
+    # 4. Initialize AI Model Registry & local Ollama provider
+    registry = ModelRegistry()
+    ollama_provider = OllamaProvider()
+    await registry.register_provider(ollama_provider)
+    _app.state.model_registry = registry
+    _app.state.ollama_provider = ollama_provider
+
+    # Non-blocking health probe on startup
+    try:
+        health = await ollama_provider.check_health()
+        if health.status == ProviderStatus.ONLINE:
+            lat = f"{health.latency_ms:.1f}ms" if health.latency_ms is not None else "N/A"
+            logger.info(
+                f"AI provider '{ollama_provider.provider_id}' is ONLINE: "
+                f"{health.message} (latency: {lat})"
+            )
+        else:
+            logger.warning(
+                f"AI provider '{ollama_provider.provider_id}' is {health.status}: {health.message}"
+            )
+    except Exception as err:
+        logger.warning(
+            f"Initial health check for provider '{ollama_provider.provider_id}' failed: {err}"
+        )
+
     yield
 
-    # 4. Graceful shutdown: close database connections
+    # 5. Graceful shutdown: close AI provider clients
+    logger.info("Closing AI providers...")
+    try:
+        await ollama_provider.close()
+    except Exception as err:
+        logger.warning(f"Error closing Ollama provider: {err}")
+
+    # 6. Graceful shutdown: close database connections
     logger.info("Shutting down database engine...")
     await engine.dispose()
     logger.info("Application shutdown complete.")
