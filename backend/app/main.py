@@ -104,27 +104,33 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
     # 4. Initialize AI Model Registry & local Ollama provider
     registry = ModelRegistry()
     ollama_provider = OllamaProvider()
-    await registry.register_provider(ollama_provider)
-    _app.state.model_registry = registry
-    _app.state.ollama_provider = ollama_provider
-
-    # Non-blocking health probe on startup
     try:
-        health = await ollama_provider.check_health()
-        if health.status == ProviderStatus.ONLINE:
-            lat = f"{health.latency_ms:.1f}ms" if health.latency_ms is not None else "N/A"
-            logger.info(
-                f"AI provider '{ollama_provider.provider_id}' is ONLINE: "
-                f"{health.message} (latency: {lat})"
-            )
-        else:
+        await registry.register_provider(ollama_provider)
+        _app.state.model_registry = registry
+        _app.state.ollama_provider = ollama_provider
+
+        # Non-blocking health probe on startup
+        try:
+            health = await ollama_provider.check_health()
+            if health.status == ProviderStatus.ONLINE:
+                lat = f"{health.latency_ms:.1f}ms" if health.latency_ms is not None else "N/A"
+                logger.info(
+                    f"AI provider '{ollama_provider.provider_id}' is ONLINE: "
+                    f"{health.message} (latency: {lat})"
+                )
+            else:
+                logger.warning(
+                    f"AI provider '{ollama_provider.provider_id}' is {health.status}: "
+                    f"{health.message}"
+                )
+        except Exception as err:
             logger.warning(
-                f"AI provider '{ollama_provider.provider_id}' is {health.status}: {health.message}"
+                f"Initial health check for provider '{ollama_provider.provider_id}' failed: {err}"
             )
-    except Exception as err:
-        logger.warning(
-            f"Initial health check for provider '{ollama_provider.provider_id}' failed: {err}"
-        )
+    except Exception as exc:
+        logger.error(f"Error initializing AI provider subsystem: {exc}")
+        await ollama_provider.close()
+        raise
 
     yield
 

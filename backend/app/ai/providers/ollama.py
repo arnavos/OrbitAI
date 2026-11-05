@@ -54,6 +54,7 @@ class RequestContext:
         self.request_id = request_id
         self.model_id = model_id
         self.cancel_event = cancel_event
+        self.response: httpx.Response | None = None
 
 
 class OllamaProvider(ModelProvider):
@@ -100,6 +101,7 @@ class OllamaProvider(ModelProvider):
         self._trackers_lock = asyncio.Lock()
         self._active_requests: dict[str, RequestContext] = {}
         self._requests_lock = asyncio.Lock()
+        self._model_context_capacities: dict[str, int] = {}
 
     @property
     def provider_id(self) -> str:
@@ -311,6 +313,9 @@ class OllamaProvider(ModelProvider):
             verified_context: int | None = None
             if isinstance(context_len, int) and context_len > 0:
                 verified_context = context_len
+                self._model_context_capacities[raw_id] = verified_context
+                if raw_name:
+                    self._model_context_capacities[raw_name] = verified_context
 
             # Check runtime residency
             resident_info = resident_map.get(raw_id) or resident_map.get(raw_name)
@@ -351,13 +356,23 @@ class OllamaProvider(ModelProvider):
 
     async def cancel_inference(self, request_id: str) -> bool:
         """Signal cooperative cancellation to an active in-flight streaming inference."""
+        resp_to_close: httpx.Response | None = None
         async with self._requests_lock:
             req_ctx = self._active_requests.get(request_id)
             if not req_ctx:
                 return False
             req_ctx.cancel_event.set()
-            logger.info(f"Triggered cancellation for inference request '{request_id}'")
-            return True
+            if req_ctx.response is not None and not req_ctx.response.is_closed:
+                resp_to_close = req_ctx.response
+
+        if resp_to_close is not None and not resp_to_close.is_closed:
+            try:
+                await resp_to_close.aclose()
+            except Exception as err:
+                logger.debug(f"Error closing response stream during cancellation: {err}")
+
+        logger.info(f"Triggered cancellation for inference request '{request_id}'")
+        return True
 
     async def _verify_model_evicted(
         self,
@@ -386,10 +401,10 @@ class OllamaProvider(ModelProvider):
         tracker = await self._get_or_create_tracker(native_id)
 
         is_leader = False
+        wait_future: asyncio.Future[bool] | None = None
         async with tracker.lock:
             if tracker.is_unloading:
-                if tracker.unload_future is not None:
-                    return await tracker.unload_future
+                wait_future = tracker.unload_future
             else:
                 tracker.is_unloading = True
                 loop = asyncio.get_running_loop()
@@ -397,8 +412,8 @@ class OllamaProvider(ModelProvider):
                 is_leader = True
 
         if not is_leader:
-            if tracker.unload_future is not None:
-                return await tracker.unload_future
+            if wait_future is not None:
+                return await wait_future
             return False
 
         try:
@@ -486,7 +501,8 @@ class OllamaProvider(ModelProvider):
                 return
 
             # 2. Build payload with context safeguards
-            options = self._build_options(request.config)
+            verified_capacity = self._model_context_capacities.get(native_id)
+            options = self._build_options(request.config, verified_capacity=verified_capacity)
             messages_payload = [
                 {
                     "role": m.role.value if hasattr(m.role, "value") else str(m.role),
@@ -517,9 +533,16 @@ class OllamaProvider(ModelProvider):
                         pool=5.0,
                     ),
                 ) as response:
+                    req_ctx.response = response
                     if response.status_code == 404:
                         raise ModelNotFoundError(
                             f"Model '{native_id}' not found in provider '{self._provider_id}'"
+                        )
+                    if response.status_code == 503:
+                        err_body = await response.aread()
+                        raise ProviderUnavailableError(
+                            "Ollama service unavailable (HTTP 503): "
+                            f"{err_body.decode(errors='replace')}"
                         )
                     if response.status_code != 200:
                         err_body = await response.aread()
@@ -530,6 +553,7 @@ class OllamaProvider(ModelProvider):
 
                     buffer = bytearray()
                     stream_iter = response.aiter_bytes()
+                    received_terminal = False
 
                     while True:
                         if cancel_event.is_set():
@@ -544,6 +568,9 @@ class OllamaProvider(ModelProvider):
                         except StopAsyncIteration:
                             break
                         except TimeoutError as err:
+                            if cancel_event.is_set():
+                                yield TokenDelta(text="", finish_reason=FinishReason.CANCELLED)
+                                return
                             raise InferenceTimeoutError(
                                 f"Inference inter-token timeout ({self._inter_token_timeout}s) "
                                 "exceeded"
@@ -593,6 +620,7 @@ class OllamaProvider(ModelProvider):
                                 if delta_text:
                                     yield TokenDelta(text=delta_text)
                             else:
+                                received_terminal = True
                                 done_reason = item.get("done_reason", "stop")
                                 finish_reason = (
                                     FinishReason.STOP
@@ -617,11 +645,95 @@ class OllamaProvider(ModelProvider):
                                 )
                                 return
 
+                        # Guard incomplete, unterminated line from growing beyond 64 KB
+                        if len(buffer) > self.MAX_LINE_BYTES:
+                            raise InferenceGenerationError(
+                                "NDJSON line exceeded maximum allowed length of "
+                                f"{self.MAX_LINE_BYTES} bytes"
+                            )
+
+                    # Process any remaining un-delimited line in buffer on stream completion
+                    if buffer:
+                        if len(buffer) > self.MAX_LINE_BYTES:
+                            raise InferenceGenerationError(
+                                "NDJSON line exceeded maximum allowed length of "
+                                f"{self.MAX_LINE_BYTES} bytes"
+                            )
+                        line_str = buffer.decode("utf-8").strip()
+                        if line_str:
+                            try:
+                                item = json.loads(line_str)
+                            except json.JSONDecodeError as err:
+                                raise InferenceGenerationError(
+                                    f"Failed to parse NDJSON response from Ollama: {err}"
+                                ) from err
+
+                            if "error" in item:
+                                err_msg = item["error"]
+                                if "not found" in err_msg.lower():
+                                    raise ModelNotFoundError(
+                                        f"Model '{native_id}' not found: {err_msg}"
+                                    )
+                                raise InferenceGenerationError(
+                                    f"Ollama generation error: {err_msg}"
+                                )
+
+                            if cancel_event.is_set():
+                                yield TokenDelta(text="", finish_reason=FinishReason.CANCELLED)
+                                return
+
+                            msg_obj = item.get("message", {})
+                            delta_text = msg_obj.get("content", "")
+                            if item.get("done", False):
+                                received_terminal = True
+                                done_reason = item.get("done_reason", "stop")
+                                finish_reason = (
+                                    FinishReason.STOP
+                                    if done_reason == "stop"
+                                    else FinishReason.LENGTH
+                                    if done_reason == "length"
+                                    else FinishReason.STOP
+                                )
+                                prompt_tokens = item.get("prompt_eval_count")
+                                completion_tokens = item.get("eval_count")
+                                usage = None
+                                if prompt_tokens is not None or completion_tokens is not None:
+                                    usage = TokenUsage(
+                                        prompt_tokens=prompt_tokens,
+                                        completion_tokens=completion_tokens,
+                                        source=UsageSource.REPORTED,
+                                    )
+                                yield TokenDelta(
+                                    text=delta_text,
+                                    finish_reason=finish_reason,
+                                    usage=usage,
+                                )
+                                return
+
+                    if cancel_event.is_set():
+                        yield TokenDelta(text="", finish_reason=FinishReason.CANCELLED)
+                        return
+
+                    if not received_terminal:
+                        raise InferenceGenerationError(
+                            "Inference stream terminated unexpectedly before completion "
+                            "(empty stream or premature EOF)"
+                        )
+
             except (httpx.ConnectError, httpx.ConnectTimeout) as err:
+                if cancel_event.is_set():
+                    yield TokenDelta(text="", finish_reason=FinishReason.CANCELLED)
+                    return
                 raise ProviderUnavailableError(f"Ollama daemon unreachable: {err}") from err
             except httpx.ReadTimeout as err:
+                if cancel_event.is_set():
+                    yield TokenDelta(text="", finish_reason=FinishReason.CANCELLED)
+                    return
                 raise InferenceTimeoutError(f"Ollama inference read timeout: {err}") from err
-            except httpx.HTTPError as err:
+            except (httpx.HTTPError, httpx.StreamError) as err:
+                if cancel_event.is_set():
+                    yield TokenDelta(text="", finish_reason=FinishReason.CANCELLED)
+                    return
                 raise InferenceGenerationError(
                     f"HTTP transport error during inference: {err}"
                 ) from err

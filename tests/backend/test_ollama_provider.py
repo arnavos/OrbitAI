@@ -359,6 +359,70 @@ async def test_ollama_streaming_cancellation():
 
 
 @pytest.mark.asyncio
+async def test_ollama_cancellation_while_waiting_for_network_data():
+    """Verify cancelling while stream is actively awaiting network data terminates cleanly."""
+    waiting_on_network = asyncio.Event()
+
+    class BlockableByteStream(httpx.AsyncByteStream):
+        def __init__(self):
+            self.closed = asyncio.Event()
+
+        async def __aiter__(self):
+            # First token is emitted immediately
+            yield b'{"message":{"role":"assistant","content":"hello"},"done":false}\n'
+            # Signal that caller is now waiting on the next network chunk
+            waiting_on_network.set()
+            # Wait until closed or cancelled
+            await self.closed.wait()
+            raise httpx.StreamClosed()
+
+        async def aclose(self):
+            self.closed.set()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, stream=BlockableByteStream())
+
+    client = httpx.AsyncClient(
+        transport=_make_transport_handler(handler), base_url="http://127.0.0.1:11434"
+    )
+    provider = OllamaProvider(http_client=client)
+
+    req = InferenceRequest(
+        request_id="network-wait-cancel",
+        model_id="llama3.2:3b",
+        messages=[ChatMessage(role=MessageRole.USER, content="test")],
+    )
+
+    stream = provider.stream_inference(req)
+    # Read first token
+    first_delta = await anext(stream)
+    assert first_delta.text == "hello"
+
+    # Start task to read next delta (this task will block waiting on network data)
+    read_task = asyncio.create_task(anext(stream))
+
+    # Wait until generator has actually entered the network wait
+    await waiting_on_network.wait()
+
+    # Now trigger cancellation while read_task is actively blocked
+    cancelled = await provider.cancel_inference("network-wait-cancel")
+    assert cancelled is True
+
+    # read_task must unblock and receive CANCELLED finish reason
+    cancel_delta = await asyncio.wait_for(read_task, timeout=2.0)
+    assert cancel_delta.finish_reason == FinishReason.CANCELLED
+
+    # Stream is at terminal state; exhausting or closing it invokes generator cleanup
+    with pytest.raises(StopAsyncIteration):
+        await anext(stream)
+
+    # Verify tracker leases were freed
+    tracker = await provider._get_or_create_tracker("llama3.2:3b")
+    assert tracker.active_inferences == 0
+    assert tracker.inferences_drained.is_set()
+
+
+@pytest.mark.asyncio
 async def test_ollama_lifecycle_blocks_inference_during_unload():
     """Verify inference leases are rejected while model is in unloading state."""
     provider = OllamaProvider()
@@ -440,6 +504,411 @@ async def test_ollama_concurrent_unloads_share_future():
     r1, r2 = await asyncio.gather(task1, task2)
     assert r1 is True
     assert r2 is True
+
+
+@pytest.mark.asyncio
+async def test_ollama_streaming_premature_eof_raises_error():
+    """Verify premature stream termination before done=True raises InferenceGenerationError."""
+    # Chunk with partial token stream and no done: true
+    ndjson = b'{"message":{"role":"assistant","content":"token1"},"done":false}\n'
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=ndjson)
+
+    client = httpx.AsyncClient(
+        transport=_make_transport_handler(handler), base_url="http://127.0.0.1:11434"
+    )
+    provider = OllamaProvider(http_client=client)
+
+    req = InferenceRequest(
+        model_id="llama3.2:3b",
+        messages=[ChatMessage(role=MessageRole.USER, content="test")],
+    )
+
+    with pytest.raises(InferenceGenerationError, match="terminated unexpectedly before completion"):
+        async for _ in provider.stream_inference(req):
+            pass
+
+
+@pytest.mark.asyncio
+async def test_ollama_streaming_empty_stream_raises_error():
+    """Verify completely empty stream raises InferenceGenerationError."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=b"")
+
+    client = httpx.AsyncClient(
+        transport=_make_transport_handler(handler), base_url="http://127.0.0.1:11434"
+    )
+    provider = OllamaProvider(http_client=client)
+
+    req = InferenceRequest(
+        model_id="llama3.2:3b",
+        messages=[ChatMessage(role=MessageRole.USER, content="test")],
+    )
+
+    with pytest.raises(InferenceGenerationError, match="terminated unexpectedly before completion"):
+        async for _ in provider.stream_inference(req):
+            pass
+
+
+@pytest.mark.asyncio
+async def test_ollama_streaming_un_delimited_final_chunk_parsed():
+    """Verify stream ending without a trailing newline parses the terminal chunk correctly."""
+    # Note: no trailing \n after the last JSON object
+    ndjson = (
+        b'{"message":{"role":"assistant","content":"Hi"},"done":false}\n'
+        b'{"message":{"role":"assistant","content":"!"},"done":true,"done_reason":"stop"}'
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=ndjson)
+
+    client = httpx.AsyncClient(
+        transport=_make_transport_handler(handler), base_url="http://127.0.0.1:11434"
+    )
+    provider = OllamaProvider(http_client=client)
+
+    req = InferenceRequest(
+        model_id="llama3.2:3b",
+        messages=[ChatMessage(role=MessageRole.USER, content="test")],
+    )
+
+    deltas = []
+    async for delta in provider.stream_inference(req):
+        deltas.append(delta)
+
+    assert len(deltas) == 2
+    assert deltas[0].text == "Hi"
+    assert deltas[1].text == "!"
+    assert deltas[1].finish_reason == FinishReason.STOP
+
+
+@pytest.mark.asyncio
+async def test_ollama_streaming_multiline_chunk_exceeding_64kb_succeeds():
+    """Verify single network chunk > 64 KB containing multiple valid lines <= 64 KB succeeds."""
+    # Two valid lines, each ~35 KB, aggregate chunk size ~70 KB (> 64 KB limit)
+    line1 = (
+        json.dumps(
+            {"message": {"role": "assistant", "content": "A" * 35000}, "done": False}
+        ).encode()
+        + b"\n"
+    )
+    line2 = (
+        json.dumps(
+            {
+                "message": {"role": "assistant", "content": "B" * 35000},
+                "done": True,
+                "done_reason": "stop",
+            }
+        ).encode()
+        + b"\n"
+    )
+    single_large_chunk = line1 + line2
+    assert len(single_large_chunk) > 65536
+    assert len(line1) <= 65536
+    assert len(line2) <= 65536
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=single_large_chunk)
+
+    client = httpx.AsyncClient(
+        transport=_make_transport_handler(handler), base_url="http://127.0.0.1:11434"
+    )
+    provider = OllamaProvider(http_client=client)
+
+    req = InferenceRequest(
+        model_id="llama3.2:3b",
+        messages=[ChatMessage(role=MessageRole.USER, content="test")],
+    )
+
+    deltas = []
+    async for delta in provider.stream_inference(req):
+        deltas.append(delta)
+
+    assert len(deltas) == 2
+    assert deltas[0].text == "A" * 35000
+    assert deltas[1].text == "B" * 35000
+    assert deltas[1].finish_reason == FinishReason.STOP
+
+
+@pytest.mark.asyncio
+async def test_ollama_streaming_single_line_exceeding_64kb_raises_error():
+    """Verify single NDJSON line exceeding 64 KB is rejected with InferenceGenerationError."""
+    # A single valid JSON line of 70 KB ending with \n
+    oversized_line = (
+        json.dumps(
+            {"message": {"role": "assistant", "content": "X" * 70000}, "done": False}
+        ).encode()
+        + b"\n"
+    )
+    assert len(oversized_line) > 65536
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=oversized_line)
+
+    client = httpx.AsyncClient(
+        transport=_make_transport_handler(handler), base_url="http://127.0.0.1:11434"
+    )
+    provider = OllamaProvider(http_client=client)
+
+    req = InferenceRequest(
+        model_id="llama3.2:3b",
+        messages=[ChatMessage(role=MessageRole.USER, content="test")],
+    )
+
+    with pytest.raises(InferenceGenerationError, match="maximum allowed length"):
+        async for _ in provider.stream_inference(req):
+            pass
+
+
+@pytest.mark.asyncio
+async def test_ollama_streaming_unterminated_line_exceeding_64kb_across_chunks_raises_error():
+    """Verify unterminated line growing beyond 64 KB across multiple chunks is rejected."""
+
+    # Two chunks with no newline, each 35 KB, aggregate 70 KB
+    async def chunk_generator():
+        yield b"A" * 35000
+        yield b"B" * 35000
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=chunk_generator())
+
+    client = httpx.AsyncClient(
+        transport=_make_transport_handler(handler), base_url="http://127.0.0.1:11434"
+    )
+    provider = OllamaProvider(http_client=client)
+
+    req = InferenceRequest(
+        model_id="llama3.2:3b",
+        messages=[ChatMessage(role=MessageRole.USER, content="test")],
+    )
+
+    with pytest.raises(InferenceGenerationError, match="maximum allowed length"):
+        async for _ in provider.stream_inference(req):
+            pass
+
+
+@pytest.mark.asyncio
+async def test_ollama_streaming_records_split_across_arbitrary_chunk_boundaries():
+    """Verify records split across arbitrary chunk boundaries are parsed cleanly."""
+    rec1 = (
+        json.dumps({"message": {"role": "assistant", "content": "part1"}, "done": False}).encode()
+        + b"\n"
+    )
+    rec2 = (
+        json.dumps({"message": {"role": "assistant", "content": "part2"}, "done": False}).encode()
+        + b"\n"
+    )
+    rec3 = (
+        json.dumps({"message": {"role": "assistant", "content": "part3"}, "done": False}).encode()
+        + b"\n"
+    )
+    rec4 = (
+        json.dumps({"message": {"role": "assistant", "content": "part4"}, "done": False}).encode()
+        + b"\n"
+    )
+    rec5 = (
+        json.dumps(
+            {
+                "message": {"role": "assistant", "content": "part5"},
+                "done": True,
+                "done_reason": "stop",
+            }
+        ).encode()
+        + b"\n"
+    )
+    full_stream = rec1 + rec2 + rec3 + rec4 + rec5
+
+    # Split into arbitrary chunks of 23 bytes (cutting through keys, values, and newlines)
+    chunk_size = 23
+    chunks = [full_stream[i : i + chunk_size] for i in range(0, len(full_stream), chunk_size)]
+    assert len(chunks) > 5
+
+    async def chunk_gen():
+        for ch in chunks:
+            yield ch
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=chunk_gen())
+
+    client = httpx.AsyncClient(
+        transport=_make_transport_handler(handler), base_url="http://127.0.0.1:11434"
+    )
+    provider = OllamaProvider(http_client=client)
+
+    req = InferenceRequest(
+        model_id="llama3.2:3b",
+        messages=[ChatMessage(role=MessageRole.USER, content="test")],
+    )
+
+    deltas = []
+    async for delta in provider.stream_inference(req):
+        deltas.append(delta)
+
+    assert len(deltas) == 5
+    assert [d.text for d in deltas] == ["part1", "part2", "part3", "part4", "part5"]
+    assert deltas[-1].finish_reason == FinishReason.STOP
+
+
+@pytest.mark.asyncio
+async def test_ollama_streaming_unbounded_line_without_newline_raises_error():
+    """Verify buffer growing beyond 64 KB without newlines raises InferenceGenerationError."""
+    # Single chunk sent without newlines exceeding 64 KB
+    chunk1 = b"A" * 70000
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=chunk1)
+
+    client = httpx.AsyncClient(
+        transport=_make_transport_handler(handler), base_url="http://127.0.0.1:11434"
+    )
+    provider = OllamaProvider(http_client=client)
+
+    req = InferenceRequest(
+        model_id="llama3.2:3b",
+        messages=[ChatMessage(role=MessageRole.USER, content="test")],
+    )
+
+    with pytest.raises(InferenceGenerationError, match="maximum allowed length"):
+        async for _ in provider.stream_inference(req):
+            pass
+
+
+@pytest.mark.asyncio
+async def test_ollama_streaming_503_maps_to_provider_unavailable():
+    """Verify HTTP 503 from Ollama maps to ProviderUnavailableError."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(503, text="Service Unavailable / Loading")
+
+    client = httpx.AsyncClient(
+        transport=_make_transport_handler(handler), base_url="http://127.0.0.1:11434"
+    )
+    provider = OllamaProvider(http_client=client)
+
+    req = InferenceRequest(
+        model_id="llama3.2:3b",
+        messages=[ChatMessage(role=MessageRole.USER, content="test")],
+    )
+
+    with pytest.raises(ProviderUnavailableError, match="HTTP 503"):
+        async for _ in provider.stream_inference(req):
+            pass
+
+
+@pytest.mark.asyncio
+async def test_ollama_verified_context_capacity_clamping():
+    """Verify that verified context capacity from discovery clamps effective context window."""
+    tags_payload = {
+        "models": [
+            {
+                "name": "small-ctx-model:latest",
+                "details": {
+                    "context_length": 2048,
+                },
+            }
+        ]
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/tags":
+            return httpx.Response(200, json=tags_payload)
+        if request.url.path == "/api/ps":
+            return httpx.Response(200, json={"models": []})
+        return httpx.Response(404)
+
+    client = httpx.AsyncClient(
+        transport=_make_transport_handler(handler), base_url="http://127.0.0.1:11434"
+    )
+    provider = OllamaProvider(http_client=client)
+
+    # Discover models to populate context capacities
+    await provider.discover_models()
+
+    # Now verify options built for small-ctx-model: default 4096 is clamped to 2048!
+    opts = provider._build_options(
+        GenerationConfig(),
+        verified_capacity=provider._model_context_capacities.get("small-ctx-model:latest"),
+    )
+    assert opts["num_ctx"] == 2048
+
+
+@pytest.mark.asyncio
+async def test_ollama_generator_abandonment_cleans_up_lease():
+    """Verify that abandoning the async generator properly releases the active inference lease."""
+
+    async def slow_stream():
+        for i in range(10):
+            yield f'{{"message":{{"content":"chunk{i}"}},"done":false}}\n'.encode()
+            await asyncio.sleep(0.05)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=slow_stream())
+
+    client = httpx.AsyncClient(
+        transport=_make_transport_handler(handler), base_url="http://127.0.0.1:11434"
+    )
+    provider = OllamaProvider(http_client=client)
+
+    req = InferenceRequest(
+        request_id="abandon-req-1",
+        model_id="llama3.2:3b",
+        messages=[ChatMessage(role=MessageRole.USER, content="test")],
+    )
+
+    stream = provider.stream_inference(req)
+    # Read only 1 chunk and break (abandoning generator)
+    async for delta in stream:
+        assert delta.text == "chunk0"
+        break
+    await stream.aclose()
+
+    # Generator is closed; check that lease was freed
+    tracker = await provider._get_or_create_tracker("llama3.2:3b")
+    assert tracker.active_inferences == 0
+    assert tracker.inferences_drained.is_set()
+
+
+@pytest.mark.asyncio
+async def test_ollama_task_cancellation_cleans_up_lease():
+    """Verify cancelling the asyncio task running inference re-raises and frees lease."""
+
+    async def infinite_stream():
+        while True:
+            yield b'{"message":{"content":"tick"},"done":false}\n'
+            await asyncio.sleep(0.05)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=infinite_stream())
+
+    client = httpx.AsyncClient(
+        transport=_make_transport_handler(handler), base_url="http://127.0.0.1:11434"
+    )
+    provider = OllamaProvider(http_client=client)
+
+    req = InferenceRequest(
+        request_id="task-cancel-req",
+        model_id="llama3.2:3b",
+        messages=[ChatMessage(role=MessageRole.USER, content="test")],
+    )
+
+    async def run_inference():
+        async for _ in provider.stream_inference(req):
+            pass
+
+    task = asyncio.create_task(run_inference())
+    await asyncio.sleep(0.05)
+
+    # Cancel task
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    # Confirm lease was freed
+    tracker = await provider._get_or_create_tracker("llama3.2:3b")
+    assert tracker.active_inferences == 0
+    assert tracker.inferences_drained.is_set()
 
 
 # ==============================================================================
