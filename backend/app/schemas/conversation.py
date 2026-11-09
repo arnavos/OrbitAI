@@ -94,4 +94,3 @@ class SendMessageResponse(BaseModel):
 
     user_message: MessageResponse
     assistant_message: MessageResponse
-

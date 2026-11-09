@@ -70,4 +70,3 @@ class Message(Base, TimestampMixin):
         UniqueConstraint("conversation_id", "sequence", name="uq_messages_conversation_sequence"),
         Index("ix_messages_conversation_sequence", "conversation_id", "sequence"),
     )
-

@@ -35,34 +35,60 @@ from app.schemas.conversation import (
 )
 
 
+class _LockEntry:
+    """Reference-counted lock descriptor for per-conversation serialization."""
+
+    __slots__ = ("lock", "ref_count")
+
+    def __init__(self) -> None:
+        self.lock = asyncio.Lock()
+        self.ref_count = 0
+
+
 class ConversationService:
     """Manages conversation thread state, atomic sequencing, and model inference orchestration.
 
     Deployment Invariant:
-        The per-conversation in-memory lock (_conversation_locks) relies on a single-backend-worker
+        The per-conversation in-memory lock (_lock_entries) relies on a single-backend-worker
         process architecture. In multi-worker deployments, a distributed synchronization primitive
         (e.g., Redis or file locks) would be required to serialize turns per conversation.
         However, the database-level atomic sequence allocation (UPDATE ... RETURNING) and
         compound unique constraint ensure database integrity across any number of processes.
     """
 
-    _conversation_locks: dict[str, asyncio.Lock] = {}
+    _lock_entries: dict[str, _LockEntry] = {}
     _locks_guard = asyncio.Lock()
 
     @classmethod
     @asynccontextmanager
     async def _acquire_conversation_lock(cls, conversation_id: str) -> AsyncGenerator[None]:
-        """Serialize simultaneous requests targeting the same conversation thread."""
+        """Serialize simultaneous requests targeting the same thread with ref-counted cleanup."""
+        # 1. Register intent and increment ref_count under global guard
         async with cls._locks_guard:
-            lock = cls._conversation_locks.setdefault(conversation_id, asyncio.Lock())
-        async with lock:
-            try:
-                yield
-            finally:
-                # Cleanup idle locks if not held
+            if conversation_id not in cls._lock_entries:
+                cls._lock_entries[conversation_id] = _LockEntry()
+            entry = cls._lock_entries[conversation_id]
+            entry.ref_count += 1
+
+        lock_acquired = False
+        try:
+            # 2. Await conversation lock (NEVER hold _locks_guard while awaiting)
+            await entry.lock.acquire()
+            lock_acquired = True
+            yield
+        finally:
+            # 3. If lock was acquired, release it
+            if lock_acquired:
+                entry.lock.release()
+
+            # 4. Decrement reference count and cleanup idle entry (shielded against cancellation)
+            async def _cleanup() -> None:
                 async with cls._locks_guard:
-                    if not lock.locked() and conversation_id in cls._conversation_locks:
-                        cls._conversation_locks.pop(conversation_id, None)
+                    entry.ref_count -= 1
+                    if entry.ref_count == 0 and cls._lock_entries.get(conversation_id) is entry:
+                        cls._lock_entries.pop(conversation_id, None)
+
+            await asyncio.shield(_cleanup())
 
     # --------------------------------------------------------------------------
     # Conversation CRUD Operations
@@ -397,22 +423,6 @@ class ConversationService:
             # ------------------------------------------------------------------
             # Phase 4: Synchronous Model Inference (ZERO Database Locks Held)
             # ------------------------------------------------------------------
-            provider = await registry.resolve_provider_for_model(target_model)
-            model_desc = await registry.get_model(target_model)
-
-            gen_config = GenerationConfig(
-                temperature=payload.temperature if payload.temperature is not None else 0.7,
-                max_output_tokens=max_output,
-                extra_params={"num_ctx": allocated_context},
-            )
-
-            inf_req = InferenceRequest(
-                request_id=asst_msg_id,
-                model_id=model_desc.id,
-                messages=assembled_messages,
-                config=gen_config,
-            )
-
             partial_tokens: list[str] = []
             final_status = "completed"
             final_finish_reason: str | None = None
@@ -420,6 +430,22 @@ class ConversationService:
             final_error: str | None = None
 
             try:
+                provider = await registry.resolve_provider_for_model(target_model)
+                model_desc = await registry.get_model(target_model)
+
+                gen_config = GenerationConfig(
+                    temperature=payload.temperature if payload.temperature is not None else 0.7,
+                    max_output_tokens=max_output,
+                    extra_params={"num_ctx": allocated_context},
+                )
+
+                inf_req = InferenceRequest(
+                    request_id=asst_msg_id,
+                    model_id=model_desc.id,
+                    messages=assembled_messages,
+                    config=gen_config,
+                )
+
                 async for delta in provider.stream_inference(inf_req):
                     if delta.text:
                         partial_tokens.append(delta.text)
@@ -434,6 +460,7 @@ class ConversationService:
                     if delta.error_detail is not None:
                         final_error = delta.error_detail.message
                         final_status = "failed"
+                        final_finish_reason = final_finish_reason or FinishReason.ERROR.value
 
                 full_content = "".join(partial_tokens)
                 if final_status != "failed":
@@ -441,12 +468,23 @@ class ConversationService:
                         final_status = "completed"
                     elif final_finish_reason == FinishReason.CANCELLED.value:
                         final_status = "interrupted"
+                    elif final_finish_reason is None:
+                        # Stream terminated prematurely without terminal finish reason
+                        final_status = "failed"
+                        final_finish_reason = FinishReason.ERROR.value
+                        final_error = (
+                            "Inference stream terminated prematurely without terminal finish reason"
+                        )
                     else:
-                        final_status = "completed"
-                        final_finish_reason = FinishReason.STOP.value
+                        final_status = "failed"
+                        final_finish_reason = FinishReason.ERROR.value
+                        final_error = (
+                            "Inference stream terminated with unsupported finish reason: "
+                            f"{final_finish_reason}"
+                        )
 
             except asyncio.CancelledError:
-                # Caller cancelled execution during streaming
+                # Caller cancelled execution during streaming or setup
                 logger.warning(f"Inference for message '{asst_msg_id}' cancelled by caller")
                 full_content = "".join(partial_tokens)
                 final_status = "interrupted"

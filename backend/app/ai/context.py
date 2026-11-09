@@ -127,30 +127,45 @@ class ContextManager:
         latest_user_msg = ChatMessage(role=MessageRole.USER, content=cleaned_user)
         budget_remaining -= user_cost
 
-        # 3. Fill Remaining Budget from History (Reverse Chronological Traversal)
+        # 3. Fill Remaining Budget from History (Reverse Chronological Traversal of Turn Pairs)
         # Filter: Only completed turns (exclude failed, interrupted, or pending turns)
         valid_history = [
             m for m in history if m.status == "completed" and m.role in ("user", "assistant")
         ]
 
-        admitted_history: list[ChatMessage] = []
-        for turn in reversed(valid_history):
-            turn_cost = cls.estimate_tokens(turn.content)
+        # Group completed historical messages into atomic (user, assistant) turn pairs.
+        # A completed historical turn requires both the prompt and the response.
+        turn_pairs: list[tuple[Message, Message]] = []
+        i = 0
+        while i < len(valid_history) - 1:
+            if valid_history[i].role == "user" and valid_history[i + 1].role == "assistant":
+                turn_pairs.append((valid_history[i], valid_history[i + 1]))
+                i += 2
+            else:
+                i += 1
+
+        admitted_turn_pairs: list[tuple[Message, Message]] = []
+        for user_turn, asst_turn in reversed(turn_pairs):
+            turn_cost = cls.estimate_tokens(user_turn.content) + cls.estimate_tokens(
+                asst_turn.content
+            )
             if turn_cost <= budget_remaining:
-                admitted_history.append(
-                    ChatMessage(
-                        role=MessageRole(turn.role),
-                        content=turn.content,
-                    )
-                )
+                admitted_turn_pairs.append((user_turn, asst_turn))
                 budget_remaining -= turn_cost
             else:
                 # Halt traversal: preserving unbroken contiguous conversation history is preferred
-                # over omitting arbitrary intermediate turns
+                # over omitting arbitrary intermediate turns or admitting half-turns.
                 break
 
-        # Reverse admitted historical turns back to chronological order (oldest to newest)
-        admitted_history.reverse()
+        # Reverse admitted turn pairs back to chronological order (oldest to newest)
+        admitted_turn_pairs.reverse()
+
+        admitted_history: list[ChatMessage] = []
+        for user_turn, asst_turn in admitted_turn_pairs:
+            admitted_history.append(ChatMessage(role=MessageRole.USER, content=user_turn.content))
+            admitted_history.append(
+                ChatMessage(role=MessageRole.ASSISTANT, content=asst_turn.content)
+            )
 
         # Combine: [system (if any)] + [historical turns] + [latest user message]
         final_messages: list[ChatMessage] = []

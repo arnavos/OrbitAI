@@ -165,3 +165,155 @@ async def test_concurrent_submissions_to_distinct_conversations_execute_in_paral
     assert r1.assistant_message.sequence == 2
     assert r2.user_message.sequence == 1
     assert r2.assistant_message.sequence == 2
+
+    # Verify lock registry is empty after completions
+    assert len(ConversationService._lock_entries) == 0
+
+
+@pytest.mark.asyncio
+async def test_lock_registry_cleanup_after_completion(db_session: AsyncSession):
+    """Verify lock entry is cleanly evicted from registry when request completes."""
+    from tests.backend.conftest import TestingSessionLocal
+
+    registry = ModelRegistry()
+    await registry.register_provider(MockFastProvider())
+
+    conv = await ConversationService.create_conversation(
+        session=db_session,
+        payload=ConversationCreate(title="Eviction Test", model_id="mock/test-model"),
+    )
+
+    assert len(ConversationService._lock_entries) == 0
+
+    await ConversationService.send_message(
+        session_factory=TestingSessionLocal,
+        conversation_id=conv.id,
+        payload=SendMessageRequest(content="Testing lock eviction", model_id="mock/test-model"),
+        registry=registry,
+    )
+
+    # Lock entry must have been removed upon completion
+    assert len(ConversationService._lock_entries) == 0
+
+
+@pytest.mark.asyncio
+async def test_lock_registry_ref_counts_and_concurrency():
+    """Verify waiting requests increment ref_count, share lock, and cleanup when all complete."""
+    conv_id = "test-refcount-conv"
+    assert conv_id not in ConversationService._lock_entries
+
+    holder_started = asyncio.Event()
+    release_holder = asyncio.Event()
+
+    async def holder():
+        async with ConversationService._acquire_conversation_lock(conv_id):
+            holder_started.set()
+            await release_holder.wait()
+
+    async def waiter():
+        async with ConversationService._acquire_conversation_lock(conv_id):
+            pass
+
+    t_holder = asyncio.create_task(holder())
+    await holder_started.wait()
+
+    # Holder is active: ref_count == 1
+    assert conv_id in ConversationService._lock_entries
+    assert ConversationService._lock_entries[conv_id].ref_count == 1
+    initial_lock = ConversationService._lock_entries[conv_id].lock
+
+    # Start waiter
+    t_waiter = asyncio.create_task(waiter())
+    await asyncio.sleep(0.01)
+
+    # Waiter is queued: ref_count == 2, sharing same lock instance
+    assert ConversationService._lock_entries[conv_id].ref_count == 2
+    assert ConversationService._lock_entries[conv_id].lock is initial_lock
+
+    # Release holder
+    release_holder.set()
+    await t_holder
+    await t_waiter
+
+    # Registry must be empty after both exit
+    assert conv_id not in ConversationService._lock_entries
+    assert len(ConversationService._lock_entries) == 0
+
+
+@pytest.mark.asyncio
+async def test_lock_registry_cancellation_while_waiting():
+    """Verify cancellation while waiting for a lock decrements ref_count without releasing unowned lock."""
+    conv_id = "test-cancel-wait-conv"
+    holder_started = asyncio.Event()
+    release_holder = asyncio.Event()
+
+    async def holder():
+        async with ConversationService._acquire_conversation_lock(conv_id):
+            holder_started.set()
+            await release_holder.wait()
+
+    async def waiter():
+        async with ConversationService._acquire_conversation_lock(conv_id):
+            pass
+
+    t_holder = asyncio.create_task(holder())
+    await holder_started.wait()
+
+    assert ConversationService._lock_entries[conv_id].ref_count == 1
+
+    t_waiter = asyncio.create_task(waiter())
+    await asyncio.sleep(0.01)
+    assert ConversationService._lock_entries[conv_id].ref_count == 2
+
+    # Cancel waiter while waiting
+    t_waiter.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await t_waiter
+
+    # Ref count decremented back to 1
+    assert ConversationService._lock_entries[conv_id].ref_count == 1
+
+    # Release holder
+    release_holder.set()
+    await t_holder
+
+    # Entry is cleaned up
+    assert conv_id not in ConversationService._lock_entries
+    assert len(ConversationService._lock_entries) == 0
+
+
+@pytest.mark.asyncio
+async def test_lock_registry_cancellation_while_holding():
+    """Verify cancellation while holding lock releases lock and decrements ref_count to zero."""
+    conv_id = "test-cancel-hold-conv"
+    holder_started = asyncio.Event()
+
+    async def holder():
+        async with ConversationService._acquire_conversation_lock(conv_id):
+            holder_started.set()
+            await asyncio.sleep(10.0)
+
+    t_holder = asyncio.create_task(holder())
+    await holder_started.wait()
+
+    assert ConversationService._lock_entries[conv_id].ref_count == 1
+    assert ConversationService._lock_entries[conv_id].lock.locked()
+
+    t_holder.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await t_holder
+
+    # Lock must be released and entry removed
+    assert conv_id not in ConversationService._lock_entries
+    assert len(ConversationService._lock_entries) == 0
+
+
+@pytest.mark.asyncio
+async def test_lock_registry_thousands_of_conversations_bounded_memory():
+    """Verify repeatedly accessing thousands of distinct conversation IDs leaves zero leaked entries."""
+    for i in range(1000):
+        c_id = f"stress-conv-{i}"
+        async with ConversationService._acquire_conversation_lock(c_id):
+            pass
+
+    assert len(ConversationService._lock_entries) == 0

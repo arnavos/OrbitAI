@@ -124,11 +124,13 @@ def test_sliding_window_prunes_oldest_turns_preserving_anchors():
 def test_failed_and_interrupted_turns_excluded_from_context():
     """Verify that messages with status != 'completed' are excluded from context assembly."""
     history = [
-        _make_msg(1, "user", "Initial question", status="completed"),
-        _make_msg(2, "assistant", "Interrupted response...", status="interrupted"),
-        _make_msg(3, "assistant", "Failed response error", status="failed"),
-        _make_msg(4, "user", "Follow-up question", status="completed"),
-        _make_msg(5, "assistant", "Successful follow-up answer", status="completed"),
+        _make_msg(1, "user", "Completed prompt 1", status="completed"),
+        _make_msg(2, "assistant", "Completed response 1", status="completed"),
+        _make_msg(3, "user", "Unfinished question", status="completed"),
+        _make_msg(4, "assistant", "Interrupted response...", status="interrupted"),
+        _make_msg(5, "assistant", "Failed response error", status="failed"),
+        _make_msg(6, "user", "Follow-up question", status="completed"),
+        _make_msg(7, "assistant", "Successful follow-up answer", status="completed"),
     ]
 
     assembled, _, _ = ContextManager.assemble_context(
@@ -138,10 +140,82 @@ def test_failed_and_interrupted_turns_excluded_from_context():
     )
 
     contents = [m.content for m in assembled]
-    assert "Initial question" in contents
+    assert "Completed prompt 1" in contents
+    assert "Completed response 1" in contents
+    # Unfinished question had an interrupted/failed assistant, so it cannot form a completed turn
+    assert "Unfinished question" not in contents
     assert "Interrupted response..." not in contents
     assert "Failed response error" not in contents
     assert "Follow-up question" in contents
     assert "Successful follow-up answer" in contents
     assert "Final question" in contents
 
+
+def test_turn_pair_atomicity_and_budget_bounds():
+    """Verify turn pairs are admitted atomically; assistant is never admitted without user prompt."""
+    allocated_context = 256
+    prompt_budget, max_output = ContextManager.compute_budgets(allocated_context)
+
+    latest_user = "Latest user prompt."
+    latest_user_cost = ContextManager.estimate_tokens(latest_user)
+    remaining_for_hist = prompt_budget - latest_user_cost
+
+    # Turn 1: Fits comfortably
+    m1 = _make_msg(1, "user", "Turn 1 question", status="completed")
+    m2 = _make_msg(2, "assistant", "Turn 1 answer", status="completed")
+
+    # Turn 2: Assistant fits alone, but user is large so the pair exceeds remaining_for_hist
+    m3_huge_user = "X" * (remaining_for_hist * 4)
+    m3 = _make_msg(3, "user", m3_huge_user, status="completed")
+    m4 = _make_msg(4, "assistant", "Short assistant reply", status="completed")
+
+    history = [m1, m2, m3, m4]
+
+    assembled, _, est_tokens = ContextManager.assemble_context(
+        history=history,
+        latest_user_content=latest_user,
+        allocated_context=allocated_context,
+    )
+
+    # Turn 2 pair was rejected as a whole because user turn exceeded remaining budget
+    # Neither m3 nor m4 should be present
+    contents = [m.content for m in assembled]
+    assert "Short assistant reply" not in contents, "Assistant turn must never be orphaned!"
+    assert m3_huge_user not in contents
+
+    # First turn should be system or user, never assistant
+    assert assembled[0].role == MessageRole.USER
+    assert assembled[-1].content == latest_user
+    assert est_tokens <= prompt_budget
+
+
+def test_large_latest_user_prompt_preserved_without_truncation():
+    """Verify that a large user prompt within budget preserves byte-for-byte and evicts history."""
+    allocated_context = 512
+    prompt_budget, _ = ContextManager.compute_budgets(allocated_context)
+
+    # Large user prompt that takes ~70% of the input budget
+    large_prompt = "Large user question text. " * 12
+    user_cost = ContextManager.estimate_tokens(large_prompt)
+    assert user_cost < prompt_budget
+
+    history = [
+        _make_msg(1, "user", "Old question 1", status="completed"),
+        _make_msg(2, "assistant", "Old answer 1", status="completed"),
+        _make_msg(3, "user", "Old question 2", status="completed"),
+        _make_msg(4, "assistant", "Old answer 2", status="completed"),
+    ]
+
+    assembled, _, est_tokens = ContextManager.assemble_context(
+        history=history,
+        latest_user_content=large_prompt,
+        allocated_context=allocated_context,
+    )
+
+    # Latest user prompt must be byte-for-byte identical (trimmed)
+    assert assembled[-1].content == large_prompt.strip()
+    assert assembled[-1].role == MessageRole.USER
+    assert est_tokens <= prompt_budget
+    # Messages in assembled must strictly alternate role (or start with system)
+    for i in range(len(assembled) - 1):
+        assert assembled[i].role != assembled[i + 1].role

@@ -84,4 +84,3 @@ def downgrade() -> None:
     op.drop_table("messages")
     op.drop_index("ix_conversations_updated_at", table_name="conversations")
     op.drop_table("conversations")
-
