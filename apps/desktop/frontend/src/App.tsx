@@ -1,12 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { Header } from './components/layout/Header';
-import { StatusBar } from './components/layout/StatusBar';
-import { HostCard } from './components/dashboard/HostCard';
-import { BackendCard } from './components/dashboard/BackendCard';
-import { DatabaseCard } from './components/dashboard/DatabaseCard';
-import { SecurityCard } from './components/dashboard/SecurityCard';
-import { AuditFeed } from './components/dashboard/AuditFeed';
 import { ErrorBoundary } from './components/ui/ErrorBoundary';
+import { ThemeProvider } from './context/ThemeContext';
+import { ChatProvider } from './context/ChatContext';
+import { AppLayout } from './components/layout/AppLayout';
 import { useBackend } from './hooks/useBackend';
 import { useWebSocket } from './hooks/useWebSocket';
 import { backendClient } from './services/backend';
@@ -59,56 +55,21 @@ export const App: React.FC = () => {
 
   return (
     <ErrorBoundary>
-      <div
-        style={{
-          display: 'flex',
-          flexDirection: 'column',
-          height: '100%',
-          padding: '24px',
-          gap: '16px',
-        }}
-      >
-        <Header status={status} port={port} wsStatus={wsStatus} />
-
-        <main
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
-            gap: '16px',
-          }}
-        >
-          <HostCard
-            systemInfo={activeSystemInfo}
-            isDesktop={backendClient.isDesktop()}
-          />
-          <BackendCard
+      <ThemeProvider>
+        <ChatProvider>
+          <AppLayout
+            status={status}
+            port={port}
+            wsStatus={wsStatus}
+            wsLatencyMs={latencyMs}
             telemetry={activeTelemetry}
             systemInfo={activeSystemInfo}
-          />
-          <DatabaseCard
-            telemetry={activeTelemetry}
-            systemInfo={activeSystemInfo}
-          />
-          <SecurityCard
-            backendPort={port}
+            auditEvents={activeAuditEvents}
             hasSessionToken={Boolean(connection?.sessionToken)}
-          />
-        </main>
-
-        <section style={{ flex: 1, minHeight: '120px' }}>
-          <AuditFeed
-            events={activeAuditEvents}
             isConnected={isConnected}
           />
-        </section>
-
-        <StatusBar
-          connectionStatus={status}
-          wsLatencyMs={latencyMs}
-          dbLatencyMs={activeTelemetry?.database_latency_ms ?? null}
-          uptimeSeconds={activeTelemetry?.uptime_seconds ?? null}
-        />
-      </div>
+        </ChatProvider>
+      </ThemeProvider>
     </ErrorBoundary>
   );
 };

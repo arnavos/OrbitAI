@@ -240,6 +240,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Discover available local AI models
+         * @description Query registered inference providers and discover installed local models.
+         */
+        get: operations["list_models_api_v1_models_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -363,6 +383,28 @@ export interface components {
             success: boolean;
             /** @description Payload data returned on success */
             data?: components["schemas"]["MessageListResponse"] | null;
+            /** @description Error information on failure */
+            error?: components["schemas"]["ErrorDetail"] | null;
+            /**
+             * Correlation Id
+             * @description Unique request tracing ID
+             */
+            correlation_id: string;
+            /**
+             * Timestamp
+             * @description ISO 8601 UTC timestamp of response generation
+             */
+            timestamp?: string;
+        };
+        /** APIResponse[ModelDiscoveryResponse] */
+        APIResponse_ModelDiscoveryResponse_: {
+            /**
+             * Success
+             * @description True if operation succeeded, false otherwise
+             */
+            success: boolean;
+            /** @description Payload data returned on success */
+            data?: components["schemas"]["ModelDiscoveryResponse"] | null;
             /** @description Error information on failure */
             error?: components["schemas"]["ErrorDetail"] | null;
             /**
@@ -759,6 +801,97 @@ export interface components {
              * Format: date-time
              */
             updated_at: string;
+        };
+        /**
+         * ModelDescriptorResponse
+         * @description Normalized metadata describing an available or resident local AI model.
+         */
+        ModelDescriptorResponse: {
+            /**
+             * Id
+             * @description Canonical provider-qualified model ID (e.g. 'ollama/llama3.2:3b')
+             */
+            id: string;
+            /**
+             * Name
+             * @description Human-readable model label
+             */
+            name: string;
+            /**
+             * Provider Type
+             * @description Backend provider classification (e.g. 'ollama')
+             */
+            provider_type: string;
+            /**
+             * Model Family
+             * @description Model architecture family (e.g. 'llama')
+             */
+            model_family?: string | null;
+            /**
+             * Parameter Size
+             * @description Parameter scale (e.g. '3.2B')
+             */
+            parameter_size?: string | null;
+            /**
+             * Quantization
+             * @description Quantization format (e.g. 'Q4_K_M')
+             */
+            quantization?: string | null;
+            /**
+             * Context Window Capacity
+             * @description Maximum context window capacity in tokens
+             */
+            context_window_capacity?: number | null;
+            /**
+             * Estimated Memory Bytes
+             * @description Estimated unified memory footprint in bytes
+             */
+            estimated_memory_bytes?: number | null;
+            /**
+             * Availability Status
+             * @description Operational readiness ('available', 'loaded', etc.)
+             * @default available
+             */
+            availability_status: string;
+            /**
+             * Provider Id
+             * @description Identifier of the hosting provider
+             */
+            provider_id?: string | null;
+            /**
+             * Native Model Id
+             * @description Native identifier within the provider (e.g. 'llama3.2:3b')
+             */
+            native_model_id?: string | null;
+            /**
+             * Capabilities
+             * @description List of supported model capabilities
+             */
+            capabilities?: string[];
+        };
+        /**
+         * ModelDiscoveryResponse
+         * @description Aggregated result of cross-provider model discovery.
+         */
+        ModelDiscoveryResponse: {
+            /**
+             * Models
+             * @description List of successfully discovered local models
+             */
+            models?: components["schemas"]["ModelDescriptorResponse"][];
+            /**
+             * Errors
+             * @description Error diagnostics for providers that failed discovery
+             */
+            errors?: {
+                [key: string]: string;
+            };
+            /**
+             * Discovered At
+             * Format: date-time
+             * @description ISO 8601 UTC timestamp when discovery was executed
+             */
+            discovered_at?: string;
         };
         /**
          * SendMessageRequest
@@ -1369,6 +1502,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["APIResponse_CancelTurnResponse_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_models_api_v1_models_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-orbit-session-token"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIResponse_ModelDiscoveryResponse_"];
                 };
             };
             /** @description Validation Error */

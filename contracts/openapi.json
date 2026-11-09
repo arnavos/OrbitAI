@@ -901,6 +901,56 @@
           }
         }
       }
+    },
+    "/api/v1/models": {
+      "get": {
+        "tags": [
+          "Models"
+        ],
+        "summary": "Discover available local AI models",
+        "description": "Query registered inference providers and discover installed local models.",
+        "operationId": "list_models_api_v1_models_get",
+        "parameters": [
+          {
+            "name": "x-orbit-session-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Orbit-Session-Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIResponse_ModelDiscoveryResponse_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1186,6 +1236,53 @@
           "correlation_id"
         ],
         "title": "APIResponse[MessageListResponse]"
+      },
+      "APIResponse_ModelDiscoveryResponse_": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "description": "True if operation succeeded, false otherwise"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ModelDiscoveryResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Payload data returned on success"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ErrorDetail"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Error information on failure"
+          },
+          "correlation_id": {
+            "type": "string",
+            "title": "Correlation Id",
+            "description": "Unique request tracing ID"
+          },
+          "timestamp": {
+            "type": "string",
+            "title": "Timestamp",
+            "description": "ISO 8601 UTC timestamp of response generation"
+          }
+        },
+        "type": "object",
+        "required": [
+          "success",
+          "correlation_id"
+        ],
+        "title": "APIResponse[ModelDiscoveryResponse]"
       },
       "APIResponse_SendMessageResponse_": {
         "properties": {
@@ -1912,6 +2009,160 @@
         ],
         "title": "MessageResponse",
         "description": "Normalized response representation of a single conversational turn."
+      },
+      "ModelDescriptorResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "Canonical provider-qualified model ID (e.g. 'ollama/llama3.2:3b')"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Human-readable model label"
+          },
+          "provider_type": {
+            "type": "string",
+            "title": "Provider Type",
+            "description": "Backend provider classification (e.g. 'ollama')"
+          },
+          "model_family": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Family",
+            "description": "Model architecture family (e.g. 'llama')"
+          },
+          "parameter_size": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parameter Size",
+            "description": "Parameter scale (e.g. '3.2B')"
+          },
+          "quantization": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quantization",
+            "description": "Quantization format (e.g. 'Q4_K_M')"
+          },
+          "context_window_capacity": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Context Window Capacity",
+            "description": "Maximum context window capacity in tokens"
+          },
+          "estimated_memory_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Estimated Memory Bytes",
+            "description": "Estimated unified memory footprint in bytes"
+          },
+          "availability_status": {
+            "type": "string",
+            "title": "Availability Status",
+            "description": "Operational readiness ('available', 'loaded', etc.)",
+            "default": "available"
+          },
+          "provider_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Id",
+            "description": "Identifier of the hosting provider"
+          },
+          "native_model_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Native Model Id",
+            "description": "Native identifier within the provider (e.g. 'llama3.2:3b')"
+          },
+          "capabilities": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Capabilities",
+            "description": "List of supported model capabilities"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "provider_type"
+        ],
+        "title": "ModelDescriptorResponse",
+        "description": "Normalized metadata describing an available or resident local AI model."
+      },
+      "ModelDiscoveryResponse": {
+        "properties": {
+          "models": {
+            "items": {
+              "$ref": "#/components/schemas/ModelDescriptorResponse"
+            },
+            "type": "array",
+            "title": "Models",
+            "description": "List of successfully discovered local models"
+          },
+          "errors": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Errors",
+            "description": "Error diagnostics for providers that failed discovery"
+          },
+          "discovered_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Discovered At",
+            "description": "ISO 8601 UTC timestamp when discovery was executed"
+          }
+        },
+        "type": "object",
+        "title": "ModelDiscoveryResponse",
+        "description": "Aggregated result of cross-provider model discovery."
       },
       "SendMessageRequest": {
         "properties": {
