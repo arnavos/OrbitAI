@@ -451,10 +451,8 @@ async def test_successful_unload_triggers_fresh_telemetry_read_before_admission(
 
 
 @pytest.mark.asyncio
-async def test_admission_rejected_when_fresh_free_memory_remains_below_1_gib(
-    mock_monitor, estimator
-):
-    """Verify admission is rejected when fresh post-unload free memory remains below 1 GiB."""
+async def test_admission_rejected_when_fresh_headroom_remains_below_1_gib(mock_monitor, estimator):
+    """Verify admission is rejected when fresh post-unload available headroom remains below 1 GiB."""
     mock_monitor.get_system_snapshot.return_value = _make_mock_snapshot(
         headroom_bytes=800_000_000, free_bytes=800_000_000
     )
@@ -465,30 +463,30 @@ async def test_admission_rejected_when_fresh_free_memory_remains_below_1_gib(
     )
 
     async def mock_unload(model_id: str) -> bool:
-        # Host memory after unload: free memory is only 900 MB (< 1 GiB threshold)
+        # Host memory after unload: available headroom is only 900 MB (< 1 GiB threshold)
         mock_monitor.get_system_snapshot.return_value = _make_mock_snapshot(
-            headroom_bytes=3_500_000_000, free_bytes=900_000_000
+            headroom_bytes=900_000_000, free_bytes=90_000_000
         )
         return True
 
     decision = await manager.execute_two_phase_admission(
         model_id="llama3.2:3b",
-        request_id="req-low-free-post",
+        request_id="req-low-headroom-post",
         requested_context=2048,
         provider_unload_callable=mock_unload,
     )
 
-    # Must be rejected because verified free memory < 1 GiB
+    # Must be rejected because verified available headroom < 1 GiB
     assert decision.outcome == AdmissionOutcome.REJECT
     assert "below the conservative model-load threshold" in decision.reason.lower()
     assert decision.handle is None
 
 
 @pytest.mark.asyncio
-async def test_admission_rejected_when_fresh_free_passes_1_gib_but_headroom_insufficient(
+async def test_admission_admitted_when_fresh_raw_free_is_low_but_reclaimable_headroom_sufficient(
     mock_monitor, estimator
 ):
-    """Verify admission is rejected when fresh free passes 1 GiB but effective headroom is insufficient."""
+    """Verify post-unload admission succeeds when raw free is low (~90MB) but reclaimable headroom is 3.5GB."""
     mock_monitor.get_system_snapshot.return_value = _make_mock_snapshot(
         headroom_bytes=800_000_000, free_bytes=800_000_000
     )
@@ -499,9 +497,43 @@ async def test_admission_rejected_when_fresh_free_passes_1_gib_but_headroom_insu
     )
 
     async def mock_unload(model_id: str) -> bool:
-        # Free memory is 2.0 GB (>= 1 GiB), but headroom is only 1.0 GB (< 2.3 GB needed)
+        # Typical Darwin behavior: unallocated free is only 90 MB, but reclaimable headroom is 3.5 GB
         mock_monitor.get_system_snapshot.return_value = _make_mock_snapshot(
-            headroom_bytes=1_000_000_000, free_bytes=2_000_000_000
+            headroom_bytes=3_500_000_000, free_bytes=90_000_000
+        )
+        return True
+
+    decision = await manager.execute_two_phase_admission(
+        model_id="llama3.2:3b",
+        request_id="req-low-free-high-headroom-post",
+        requested_context=2048,
+        provider_unload_callable=mock_unload,
+    )
+
+    # Must be admitted because effective headroom (3.5 GB) >= 1 GiB and >= model footprint
+    assert decision.outcome == AdmissionOutcome.ALLOW
+    assert decision.handle is not None
+    assert decision.available_headroom_bytes == 3_500_000_000
+
+
+@pytest.mark.asyncio
+async def test_admission_rejected_when_fresh_headroom_passes_1_gib_threshold_but_model_does_not_fit(
+    mock_monitor, estimator
+):
+    """Verify admission is rejected when fresh headroom passes 1 GiB threshold but is insufficient to fit model."""
+    mock_monitor.get_system_snapshot.return_value = _make_mock_snapshot(
+        headroom_bytes=800_000_000, free_bytes=800_000_000
+    )
+    manager = ResourceManager(monitor=mock_monitor, estimator=estimator)
+
+    await manager.confirm_model_loaded(
+        "model_a:latest", verified_context=2048, observed_size_bytes=2_500_000_000
+    )
+
+    async def mock_unload(model_id: str) -> bool:
+        # Headroom is 1.5 GB (>= 1 GiB load threshold), but model requires ~2.3 GB
+        mock_monitor.get_system_snapshot.return_value = _make_mock_snapshot(
+            headroom_bytes=1_500_000_000, free_bytes=90_000_000
         )
         return True
 
@@ -776,3 +808,191 @@ async def test_reconciliation_telemetry_failure_isolation(mock_monitor, estimato
     # Now daemon reports model is gone
     await manager.reconcile_with_daemon([])
     assert "deepseek-coder:6.7b" not in manager._resident_models
+
+
+@pytest.mark.asyncio
+async def test_darwin_cold_load_admitted_with_low_raw_free_pages_and_sufficient_reclaimable_headroom(
+    estimator,
+):
+    """Verify cold model load is admitted on Darwin when raw free pages are ~90MB but reclaimable headroom is ~3GB."""
+    now = datetime.now(UTC)
+    # Realistic Darwin 16GB snapshot: 90 MB raw free, 5.5 GB inactive, 300 MB purgeable
+    direct = DirectHostMemory(
+        total_physical_bytes=16 * (1024**3),
+        free_bytes=90 * (1024**2),
+        active_bytes=6 * (1024**3),
+        inactive_bytes=5500 * (1024**2),
+        wired_bytes=3 * (1024**3),
+        compressor_bytes=500 * (1024**2),
+        purgeable_bytes=300 * (1024**2),
+        external_page_bytes=0,
+        swap_used_bytes=0,
+        swap_total_bytes=0,
+        pressure_level=MemoryPressureLevel.NORMAL,
+        kernel_pressure_raw=1,
+        is_available=True,
+        measured_at=now,
+    )
+    derived = DerivedHeadroom(
+        reclaimable_bytes=4_000_000_000,
+        effective_host_headroom_bytes=3_000_000_000,
+        os_safety_reserve_bytes=1_073_741_824,
+        inactive_reclaim_factor=0.70,
+        is_conservative=False,
+        computed_at=now,
+    )
+    mock_mon = MagicMock(spec=MacOSMemoryMonitor)
+    mock_mon.get_system_snapshot.return_value = SystemMemorySnapshot(
+        direct=direct, derived=derived, timestamp=now
+    )
+    policy = MemoryPressurePolicy(
+        os_safety_reserve_bytes=1_073_741_824,
+        min_free_memory_for_load_bytes=1_073_741_824,
+    )
+    manager = ResourceManager(monitor=mock_mon, estimator=estimator, policy=policy)
+
+    # Cold model load for llama3.2:3b (not resident)
+    decision = await manager.acquire_admission("llama3.2:3b", "req-darwin-cold-allow", 2048)
+    assert decision.outcome == AdmissionOutcome.ALLOW
+    assert decision.handle is not None
+    assert decision.handle.pending_load is not None
+    assert decision.handle.pending_load.reserved_base_bytes > 0
+    assert "admitted" in decision.reason.lower()
+
+
+@pytest.mark.asyncio
+async def test_darwin_cold_load_rejected_with_low_raw_free_pages_and_insufficient_reclaimable_headroom(
+    estimator,
+):
+    """Verify cold model load is rejected when raw free is low AND verified reclaimable headroom is below threshold."""
+    now = datetime.now(UTC)
+    direct = DirectHostMemory(
+        total_physical_bytes=16 * (1024**3),
+        free_bytes=90 * (1024**2),
+        active_bytes=12 * (1024**3),
+        inactive_bytes=800 * (1024**2),
+        wired_bytes=3 * (1024**3),
+        compressor_bytes=500 * (1024**2),
+        purgeable_bytes=50 * (1024**2),
+        external_page_bytes=0,
+        swap_used_bytes=0,
+        swap_total_bytes=0,
+        pressure_level=MemoryPressureLevel.NORMAL,
+        kernel_pressure_raw=1,
+        is_available=True,
+        measured_at=now,
+    )
+    derived = DerivedHeadroom(
+        reclaimable_bytes=700_000_000,
+        effective_host_headroom_bytes=0,
+        os_safety_reserve_bytes=1_073_741_824,
+        inactive_reclaim_factor=0.70,
+        is_conservative=False,
+        computed_at=now,
+    )
+    mock_mon = MagicMock(spec=MacOSMemoryMonitor)
+    mock_mon.get_system_snapshot.return_value = SystemMemorySnapshot(
+        direct=direct, derived=derived, timestamp=now
+    )
+    policy = MemoryPressurePolicy(
+        os_safety_reserve_bytes=1_073_741_824,
+        min_free_memory_for_load_bytes=1_073_741_824,
+    )
+    manager = ResourceManager(monitor=mock_mon, estimator=estimator, policy=policy)
+
+    decision = await manager.acquire_admission("llama3.2:3b", "req-darwin-cold-reject", 2048)
+    assert decision.outcome == AdmissionOutcome.REJECT
+    assert "below the conservative model-load threshold" in decision.reason.lower()
+    assert decision.handle is None
+
+
+@pytest.mark.asyncio
+async def test_darwin_cold_load_rejected_when_os_reserve_exceeds_reclaimable(estimator):
+    """Verify OS safety reserve floor strictly protects memory and causes rejection when reclaimable is tight."""
+    now = datetime.now(UTC)
+    # Reclaimable is 1.5 GB, but OS reserve is 1.0 GB -> headroom is only 500 MB (< 1 GiB threshold)
+    derived = DerivedHeadroom(
+        reclaimable_bytes=1_500_000_000,
+        effective_host_headroom_bytes=500_000_000,
+        os_safety_reserve_bytes=1_000_000_000,
+        inactive_reclaim_factor=0.70,
+        is_conservative=False,
+        computed_at=now,
+    )
+    direct = DirectHostMemory(
+        total_physical_bytes=16 * (1024**3),
+        free_bytes=90 * (1024**2),
+        is_available=True,
+        pressure_level=MemoryPressureLevel.NORMAL,
+        measured_at=now,
+    )
+    mock_mon = MagicMock(spec=MacOSMemoryMonitor)
+    mock_mon.get_system_snapshot.return_value = SystemMemorySnapshot(
+        direct=direct, derived=derived, timestamp=now
+    )
+    policy = MemoryPressurePolicy(
+        os_safety_reserve_bytes=1_000_000_000,
+        min_free_memory_for_load_bytes=1_073_741_824,
+    )
+    manager = ResourceManager(monitor=mock_mon, estimator=estimator, policy=policy)
+
+    decision = await manager.acquire_admission("llama3.2:3b", "req-reserve-enforced", 2048)
+    assert decision.outcome == AdmissionOutcome.REJECT
+    assert "below the conservative model-load threshold" in decision.reason.lower()
+    assert decision.available_headroom_bytes == 500_000_000
+
+
+@pytest.mark.asyncio
+async def test_darwin_cold_load_rejected_on_unknown_telemetry_or_pressure(estimator):
+    """Verify cold model load is rejected conservatively when kernel pressure is UNKNOWN."""
+    now = datetime.now(UTC)
+    direct = DirectHostMemory(
+        total_physical_bytes=16 * (1024**3),
+        free_bytes=90 * (1024**2),
+        pressure_level=MemoryPressureLevel.UNKNOWN,
+        is_available=True,
+        measured_at=now,
+    )
+    derived = DerivedHeadroom(
+        reclaimable_bytes=0,
+        effective_host_headroom_bytes=0,
+        os_safety_reserve_bytes=1024**3,
+        inactive_reclaim_factor=0.0,
+        is_conservative=True,
+        computed_at=now,
+    )
+    mock_mon = MagicMock(spec=MacOSMemoryMonitor)
+    mock_mon.get_system_snapshot.return_value = SystemMemorySnapshot(
+        direct=direct, derived=derived, timestamp=now
+    )
+    manager = ResourceManager(monitor=mock_mon, estimator=estimator)
+    decision = await manager.acquire_admission("llama3.2:3b", "req-unknown-pressure", 2048)
+    assert decision.outcome == AdmissionOutcome.REJECT
+    assert "telemetry unavailable" in decision.reason.lower()
+
+
+@pytest.mark.asyncio
+async def test_multiple_cold_load_reservations_deduct_without_double_counting(
+    estimator,
+):
+    """Verify multiple active cold reservations correctly reduce effective headroom without double-counting."""
+    # Host has 5.0 GB headroom
+    mock_mon = MagicMock(spec=MacOSMemoryMonitor)
+    mock_mon.get_system_snapshot.return_value = _make_mock_snapshot(5_000_000_000)
+    manager = ResourceManager(monitor=mock_mon, estimator=estimator)
+
+    # First cold model reservation (~2.3 GB)
+    dec1 = await manager.acquire_admission("llama3.2:3b", "req-multi-1", 2048)
+    assert dec1.outcome == AdmissionOutcome.ALLOW
+    assert dec1.handle.pending_load is not None
+
+    # Second request evaluates under active pending reservation of first request
+    # Effective headroom should be 5.0 GB - base1 (~2.7 GB remaining)
+    dec2 = await manager.acquire_admission("llama3.2:3b", "req-multi-2", 2048)
+    assert dec2.outcome == AdmissionOutcome.ALLOW
+    assert dec2.handle.pending_load is not None
+
+    # Third request: 5.0 GB - (base1 + base2) < 2.3 GB -> must DEFER while active loads in flight
+    dec3 = await manager.acquire_admission("llama3.2:3b", "req-multi-3", 2048)
+    assert dec3.outcome == AdmissionOutcome.DEFER
+    assert "active leases" in dec3.reason.lower() or "pending loads" in dec3.reason.lower()

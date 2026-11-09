@@ -227,12 +227,16 @@ class ResourceManager:
 
         total_req_bytes = pending_base_needed + incremental_needed
 
-        # 4. Conservative model-load verification: require minimum verified free host memory
+        # 4. Conservative model-load verification: require minimum verified available headroom
         if not is_resident:
             req_free_bytes = self.policy.min_free_memory_for_load_bytes
             req_free_mb = req_free_bytes / (1024**2)
 
-            if not snapshot.direct.is_available or snapshot.direct.free_bytes is None:
+            if (
+                not snapshot.direct.is_available
+                or snapshot.direct.free_bytes is None
+                or snapshot.derived.is_conservative
+            ):
                 diag = (
                     f": {snapshot.direct.diagnostic_message}"
                     if snapshot.direct.diagnostic_message
@@ -253,8 +257,8 @@ class ResourceManager:
                     evaluated_at=now,
                 )
 
-            if snapshot.direct.free_bytes < req_free_bytes:
-                free_mb = snapshot.direct.free_bytes / (1024**2)
+            if effective_headroom < req_free_bytes:
+                avail_mb = effective_headroom / (1024**2)
 
                 # Identify an eligible idle resident model as a provisional eviction candidate
                 # No speculative memory credit is added to free memory or effective headroom.
@@ -272,7 +276,7 @@ class ResourceManager:
                         available_headroom_bytes=effective_headroom,
                         models_to_unload=[eviction_candidate],
                         reason=(
-                            f"Verified free memory ({free_mb:.1f} MB) is below "
+                            f"Verified available headroom ({avail_mb:.1f} MB) is below "
                             f"{req_free_mb:.1f} MB threshold; "
                             f"requires provisional eviction of '{eviction_candidate}'"
                         ),
@@ -292,7 +296,7 @@ class ResourceManager:
                         estimated_total_bytes=total_req_bytes,
                         available_headroom_bytes=effective_headroom,
                         reason=(
-                            f"Verified free memory ({free_mb:.1f} MB) is below threshold "
+                            f"Verified available headroom ({avail_mb:.1f} MB) is below threshold "
                             f"({req_free_mb:.1f} MB); deferring while active leases finish"
                         ),
                         evaluated_at=now,
@@ -306,8 +310,8 @@ class ResourceManager:
                     estimated_total_bytes=total_req_bytes,
                     available_headroom_bytes=effective_headroom,
                     reason=(
-                        f"Admission rejected: verified free memory ({free_mb:.1f} MB) is below the "
-                        f"conservative model-load threshold ({req_free_mb:.1f} MB)"
+                        f"Admission rejected: verified available headroom ({avail_mb:.1f} MB) "
+                        f"is below the conservative model-load threshold ({req_free_mb:.1f} MB)"
                     ),
                     evaluated_at=now,
                 )
@@ -590,7 +594,9 @@ class ResourceManager:
                 > self.policy.snapshot_freshness_seconds
             )
             is_unavailable = (
-                not snapshot_post.direct.is_available or snapshot_post.direct.free_bytes is None
+                not snapshot_post.direct.is_available
+                or snapshot_post.direct.free_bytes is None
+                or snapshot_post.derived.is_conservative
             )
 
             if is_unavailable or is_stale:
