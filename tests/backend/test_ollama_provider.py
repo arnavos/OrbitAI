@@ -12,11 +12,21 @@ import pytest
 
 from app.ai.exceptions import (
     InferenceGenerationError,
+    InsufficientMemoryError,
     InvalidInferenceRequestError,
     ModelNotFoundError,
     ProviderUnavailableError,
 )
 from app.ai.providers.ollama import OllamaProvider
+from app.ai.resources import MemoryPressurePolicy, ResourceManager
+from app.ai.resources.estimator import ModelMemoryEstimator
+from app.ai.resources.monitor import MacOSMemoryMonitor
+from app.ai.resources.types import (
+    DerivedHeadroom,
+    DirectHostMemory,
+    MemoryPressureLevel,
+    SystemMemorySnapshot,
+)
 from app.ai.types import (
     ChatMessage,
     FinishReason,
@@ -957,3 +967,223 @@ async def test_live_ollama_real_inference_if_running():
         assert len(full_text.strip()) > 0
     finally:
         await provider.close()
+
+
+# ==============================================================================
+# M1.3: ResourceManager & Memory Safeguard Integration Tests
+# ==============================================================================
+
+
+def _make_mock_resource_snapshot(headroom_bytes: int) -> SystemMemorySnapshot:
+    from datetime import UTC, datetime
+
+    now = datetime.now(UTC)
+    direct = DirectHostMemory(
+        total_physical_bytes=16 * (1024**3),
+        free_bytes=headroom_bytes,
+        active_bytes=4 * (1024**3),
+        inactive_bytes=2 * (1024**3),
+        wired_bytes=3 * (1024**3),
+        compressor_bytes=0,
+        purgeable_bytes=0,
+        external_page_bytes=0,
+        swap_used_bytes=0,
+        swap_total_bytes=0,
+        pressure_level=MemoryPressureLevel.NORMAL,
+        kernel_pressure_raw=1,
+        measured_at=now,
+    )
+    derived = DerivedHeadroom(
+        reclaimable_bytes=headroom_bytes,
+        effective_host_headroom_bytes=headroom_bytes,
+        os_safety_reserve_bytes=0,
+        inactive_reclaim_factor=0.30,
+        is_pressure_gated=False,
+        computed_at=now,
+    )
+    return SystemMemorySnapshot(direct=direct, derived=derived, timestamp=now)
+
+
+@pytest.mark.asyncio
+async def test_ollama_with_resource_manager_admission_allow_and_confirm():
+    """Verify OllamaProvider streaming under ResourceManager confirms model loaded."""
+    from unittest.mock import MagicMock
+
+    mock_monitor = MagicMock(spec=MacOSMemoryMonitor)
+    mock_monitor.get_system_snapshot.return_value = _make_mock_resource_snapshot(5 * (1024**3))
+    estimator = ModelMemoryEstimator()
+    arch = {
+        "size": 2_000_000_000,
+        "model_info": {
+            "general.architecture": "llama",
+            "llama.block_count": 28,
+            "llama.attention.head_count_kv": 8,
+            "llama.attention.key_length": 128,
+        },
+    }
+    estimator.cache_model_architecture("llama3.2:3b", arch)
+    manager = ResourceManager(monitor=mock_monitor, estimator=estimator)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        content = (
+            b'{"message":{"content":"Hello"},"done":false}\n'
+            b'{"message":{"content":" world"},"done":true}\n'
+        )
+        return httpx.Response(200, content=content)
+
+    client = httpx.AsyncClient(
+        transport=_make_transport_handler(handler), base_url="http://127.0.0.1:11434"
+    )
+    provider = OllamaProvider(http_client=client, resource_manager=manager)
+
+    req = InferenceRequest(
+        request_id="rm-req-1",
+        model_id="llama3.2:3b",
+        messages=[ChatMessage(role=MessageRole.USER, content="hi")],
+    )
+
+    tokens = []
+    async for delta in provider.stream_inference(req):
+        if delta.text:
+            tokens.append(delta.text)
+
+    assert "".join(tokens) == "Hello world"
+    # Model confirmed in Layer A resident models
+    assert "llama3.2:3b" in manager._resident_models
+    # Layer B inference allocation released
+    assert "rm-req-1" not in manager._active_inferences
+
+
+@pytest.mark.asyncio
+async def test_ollama_with_resource_manager_context_reduction():
+    """Verify ResourceManager context reduction propagates into Ollama options payload."""
+    from unittest.mock import MagicMock
+
+    # Headroom allows 2048 ctx (approx 2.3 GB) but not 4096 ctx (approx 2.6 GB)
+    mock_monitor = MagicMock(spec=MacOSMemoryMonitor)
+    mock_monitor.get_system_snapshot.return_value = _make_mock_resource_snapshot(2_450_000_000)
+
+    estimator = ModelMemoryEstimator()
+    arch = {
+        "size": 2_000_000_000,
+        "model_info": {
+            "general.architecture": "llama",
+            "llama.block_count": 28,
+            "llama.attention.head_count_kv": 8,
+            "llama.attention.key_length": 128,
+        },
+    }
+    estimator.cache_model_architecture("llama3.2:3b", arch)
+
+    policy = MemoryPressurePolicy(
+        default_context_length=4096,
+        reduced_context_length=2048,
+        min_context_length=1024,
+    )
+    manager = ResourceManager(monitor=mock_monitor, estimator=estimator, policy=policy)
+
+    captured_payload = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal captured_payload
+        captured_payload = json.loads(request.content.decode())
+        content = b'{"message":{"content":"ok"},"done":true}\n'
+        return httpx.Response(200, content=content)
+
+    client = httpx.AsyncClient(
+        transport=_make_transport_handler(handler), base_url="http://127.0.0.1:11434"
+    )
+    provider = OllamaProvider(http_client=client, resource_manager=manager)
+
+    req = InferenceRequest(
+        request_id="rm-req-reduce",
+        model_id="llama3.2:3b",
+        messages=[ChatMessage(role=MessageRole.USER, content="hi")],
+        config=GenerationConfig(extra_params={"num_ctx": 4096}),
+    )
+
+    async for _ in provider.stream_inference(req):
+        pass
+
+    # num_ctx passed to Ollama daemon was clamped to reduced context 2048
+    assert captured_payload.get("options", {}).get("num_ctx") == 2048
+
+
+@pytest.mark.asyncio
+async def test_ollama_with_resource_manager_insufficient_memory_raises_error():
+    """Verify InsufficientMemoryError is raised when available headroom cannot satisfy model."""
+    from unittest.mock import MagicMock
+
+    mock_monitor = MagicMock(spec=MacOSMemoryMonitor)
+    mock_monitor.get_system_snapshot.return_value = _make_mock_resource_snapshot(500_000_000)
+    manager = ResourceManager(monitor=mock_monitor)
+
+    client = httpx.AsyncClient(base_url="http://127.0.0.1:11434")
+    provider = OllamaProvider(http_client=client, resource_manager=manager)
+
+    req = InferenceRequest(
+        request_id="rm-req-oom",
+        model_id="llama3.2:3b",
+        messages=[ChatMessage(role=MessageRole.USER, content="hi")],
+    )
+
+    with pytest.raises(InsufficientMemoryError) as exc_info:
+        async for _ in provider.stream_inference(req):
+            pass
+
+    assert exc_info.value.code == "INSUFFICIENT_MEMORY"
+    assert exc_info.value.status_code == 507
+
+
+@pytest.mark.asyncio
+async def test_ollama_discover_models_populates_estimated_memory_from_resource_manager():
+    """Verify discover_models populates estimated_memory_bytes via attached estimator."""
+    from unittest.mock import MagicMock
+
+    mock_monitor = MagicMock(spec=MacOSMemoryMonitor)
+    mock_monitor.get_system_snapshot.return_value = _make_mock_resource_snapshot(5 * (1024**3))
+    estimator = ModelMemoryEstimator()
+    arch = {
+        "size": 2_000_000_000,
+        "details": {"parameter_size": "3.2B"},
+        "model_info": {
+            "general.architecture": "llama",
+            "llama.block_count": 28,
+            "llama.attention.head_count_kv": 8,
+            "llama.attention.key_length": 128,
+        },
+    }
+    estimator.cache_model_architecture("llama3.2:3b", arch)
+    manager = ResourceManager(monitor=mock_monitor, estimator=estimator)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/tags":
+            return httpx.Response(
+                200,
+                json={
+                    "models": [
+                        {
+                            "name": "llama3.2:3b",
+                            "model": "llama3.2:3b",
+                            "size": 2_000_000_000,
+                            "details": {"parameter_size": "3.2B", "context_length": 4096},
+                        }
+                    ]
+                },
+            )
+        if request.url.path == "/api/ps":
+            return httpx.Response(200, json={"models": []})
+        return httpx.Response(404)
+
+    client = httpx.AsyncClient(
+        transport=_make_transport_handler(handler), base_url="http://127.0.0.1:11434"
+    )
+    provider = OllamaProvider(http_client=client, resource_manager=manager)
+
+    descriptors = await provider.discover_models()
+    assert len(descriptors) == 1
+    desc = descriptors[0]
+    assert desc.availability_status == ModelAvailabilityStatus.AVAILABLE
+    # Populated from estimator even though not resident in Ollama
+    assert desc.estimated_memory_bytes is not None
+    assert desc.estimated_memory_bytes > 2_000_000_000

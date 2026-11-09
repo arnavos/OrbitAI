@@ -13,6 +13,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.ai.providers import OllamaProvider
 from app.ai.registry import ModelRegistry
+from app.ai.resources import MemoryPressurePolicy, ResourceManager
 from app.ai.types import ProviderStatus
 from app.api.router import api_router
 from app.core.config import settings
@@ -101,11 +102,27 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
         logger.error(f"Fatal error during database initialization: {e}")
         raise
 
-    # 4. Initialize AI Model Registry & local Ollama provider
+    # 4. Initialize Resource Manager, AI Model Registry & local Ollama provider
+    resource_policy = MemoryPressurePolicy(
+        os_safety_reserve_bytes=settings.resource_os_safety_reserve_bytes,
+        inactive_reclaim_factor=settings.resource_inactive_reclaim_factor,
+        min_free_memory_for_load_bytes=settings.resource_min_free_memory_for_load_bytes,
+        default_context_length=settings.resource_default_context_length,
+        reduced_context_length=settings.resource_reduced_context_length,
+        min_context_length=settings.resource_min_context_length,
+        unload_cooldown_seconds=settings.resource_unload_cooldown_seconds,
+        reservation_timeout_seconds=settings.resource_reservation_timeout_seconds,
+        pressure_poll_interval_seconds=settings.resource_pressure_poll_interval_seconds,
+        snapshot_freshness_seconds=settings.resource_snapshot_freshness_seconds,
+    )
+    resource_manager = ResourceManager(policy=resource_policy)
+    await resource_manager.start()
+
     registry = ModelRegistry()
-    ollama_provider = OllamaProvider()
+    ollama_provider = OllamaProvider(resource_manager=resource_manager)
     try:
         await registry.register_provider(ollama_provider)
+        _app.state.resource_manager = resource_manager
         _app.state.model_registry = registry
         _app.state.ollama_provider = ollama_provider
 
@@ -129,12 +146,19 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
             )
     except Exception as exc:
         logger.error(f"Error initializing AI provider subsystem: {exc}")
+        await resource_manager.stop()
         await ollama_provider.close()
         raise
 
     yield
 
-    # 5. Graceful shutdown: close AI provider clients
+    # 5. Graceful shutdown: stop resource manager and close AI provider clients
+    logger.info("Stopping resource manager...")
+    try:
+        await resource_manager.stop()
+    except Exception as err:
+        logger.warning(f"Error stopping resource manager: {err}")
+
     logger.info("Closing AI providers...")
     try:
         await ollama_provider.close()

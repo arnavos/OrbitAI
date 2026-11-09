@@ -97,6 +97,69 @@ class Settings(BaseSettings):
         description="Model memory residency duration in Ollama daemon (e.g. '5m', '0')",
     )
 
+    # Resource Manager & Memory Safeguards (M1.3)
+    resource_os_safety_reserve_bytes: int = Field(
+        default=3_758_096_384,  # 3.5 GB
+        ge=536_870_912,  # Min 512 MB
+        validation_alias="ORBIT_RESOURCE_OS_SAFETY_RESERVE_BYTES",
+        description="Headroom floor reserved for macOS kernel and apps",
+    )
+    resource_inactive_reclaim_factor: float = Field(
+        default=0.30,
+        ge=0.0,
+        le=1.0,
+        validation_alias="ORBIT_RESOURCE_INACTIVE_RECLAIM_FACTOR",
+        description="Fraction of inactive memory considered reclaimable",
+    )
+    resource_min_free_memory_for_load_bytes: int = Field(
+        default=1_073_741_824,  # 1.0 GB
+        ge=0,
+        validation_alias="ORBIT_RESOURCE_MIN_FREE_MEMORY_FOR_LOAD_BYTES",
+        description="Minimum verified free host memory required to admit a new model load",
+    )
+    resource_default_context_length: int = Field(
+        default=4096,
+        gt=0,
+        validation_alias="ORBIT_RESOURCE_DEFAULT_CONTEXT_LENGTH",
+        description="Default context window length in tokens for model inference",
+    )
+    resource_reduced_context_length: int = Field(
+        default=2048,
+        gt=0,
+        validation_alias="ORBIT_RESOURCE_REDUCED_CONTEXT_LENGTH",
+        description="Clamped context window length under memory constraint",
+    )
+    resource_min_context_length: int = Field(
+        default=1024,
+        gt=0,
+        validation_alias="ORBIT_RESOURCE_MIN_CONTEXT_LENGTH",
+        description="Minimum viable context window length before admission rejection",
+    )
+    resource_unload_cooldown_seconds: float = Field(
+        default=30.0,
+        ge=0.0,
+        validation_alias="ORBIT_RESOURCE_UNLOAD_COOLDOWN_SECONDS",
+        description="Anti-thrashing cooldown duration preventing rapid model evictions",
+    )
+    resource_reservation_timeout_seconds: float = Field(
+        default=60.0,
+        gt=0.0,
+        validation_alias="ORBIT_RESOURCE_RESERVATION_TIMEOUT_SECONDS",
+        description="Max duration a pending model load reservation holds budget",
+    )
+    resource_pressure_poll_interval_seconds: float = Field(
+        default=3.0,
+        gt=0.0,
+        validation_alias="ORBIT_RESOURCE_PRESSURE_POLL_INTERVAL_SECONDS",
+        description="Background interval in seconds for sampling pressure",
+    )
+    resource_snapshot_freshness_seconds: float = Field(
+        default=1.0,
+        gt=0.0,
+        validation_alias="ORBIT_RESOURCE_SNAPSHOT_FRESHNESS_SECONDS",
+        description="Max age in seconds for cached host memory snapshot",
+    )
+
     @field_validator("host")
     @classmethod
     def validate_loopback_only(cls, v: str) -> str:

@@ -9,13 +9,17 @@ from typing import Any
 import httpx
 
 from app.ai.exceptions import (
+    AdmissionDeferredError,
     InferenceGenerationError,
     InferenceTimeoutError,
+    InsufficientMemoryError,
     InvalidInferenceRequestError,
     ModelNotFoundError,
     ProviderUnavailableError,
 )
 from app.ai.provider import ModelProvider
+from app.ai.resources.manager import ResourceManager
+from app.ai.resources.types import AdmissionOutcome
 from app.ai.types import (
     FinishReason,
     GenerationConfig,
@@ -77,6 +81,7 @@ class OllamaProvider(ModelProvider):
         keep_alive: str | None = None,
         http_client: httpx.AsyncClient | None = None,
         provider_id: str = "ollama",
+        resource_manager: ResourceManager | None = None,
     ) -> None:
         self._provider_id = provider_id
         self._base_url = (base_url or settings.ollama_base_url).rstrip("/")
@@ -92,6 +97,7 @@ class OllamaProvider(ModelProvider):
             else settings.ollama_inter_token_timeout
         )
         self._keep_alive = keep_alive or settings.ollama_keep_alive
+        self._resource_manager = resource_manager
 
         self._external_client = http_client is not None
         self._client = http_client
@@ -102,6 +108,15 @@ class OllamaProvider(ModelProvider):
         self._active_requests: dict[str, RequestContext] = {}
         self._requests_lock = asyncio.Lock()
         self._model_context_capacities: dict[str, int] = {}
+
+    @property
+    def resource_manager(self) -> ResourceManager | None:
+        """Attached ResourceManager instance, if any."""
+        return self._resource_manager
+
+    @resource_manager.setter
+    def resource_manager(self, manager: ResourceManager | None) -> None:
+        self._resource_manager = manager
 
     @property
     def provider_id(self) -> str:
@@ -175,6 +190,7 @@ class OllamaProvider(ModelProvider):
         self,
         config: GenerationConfig,
         verified_capacity: int | None = None,
+        allocated_context: int | None = None,
     ) -> dict[str, Any]:
         """Construct sanitized options dictionary enforcing ORBIT context safeguards."""
         options: dict[str, Any] = {
@@ -183,18 +199,23 @@ class OllamaProvider(ModelProvider):
         }
 
         # 1. Determine effective context window (num_ctx)
-        requested_ctx = config.extra_params.get("num_ctx")
-        if requested_ctx is not None:
-            if not isinstance(requested_ctx, int) or requested_ctx <= 0:
-                raise InvalidInferenceRequestError("num_ctx must be a strictly positive integer")
-            if requested_ctx > self.MAX_CONTEXT_CEILING:
-                raise InvalidInferenceRequestError(
-                    f"Requested context {requested_ctx} exceeds maximum ceiling of "
-                    f"{self.MAX_CONTEXT_CEILING} tokens"
-                )
-            effective_ctx = requested_ctx
+        if allocated_context is not None and allocated_context > 0:
+            effective_ctx = allocated_context
         else:
-            effective_ctx = self.DEFAULT_CONTEXT_WINDOW
+            requested_ctx = config.extra_params.get("num_ctx")
+            if requested_ctx is not None:
+                if not isinstance(requested_ctx, int) or requested_ctx <= 0:
+                    raise InvalidInferenceRequestError(
+                        "num_ctx must be a strictly positive integer"
+                    )
+                if requested_ctx > self.MAX_CONTEXT_CEILING:
+                    raise InvalidInferenceRequestError(
+                        f"Requested context {requested_ctx} exceeds maximum ceiling of "
+                        f"{self.MAX_CONTEXT_CEILING} tokens"
+                    )
+                effective_ctx = requested_ctx
+            else:
+                effective_ctx = self.DEFAULT_CONTEXT_WINDOW
 
         # Respect verified model context capacity if known
         if verified_capacity is not None and verified_capacity > 0:
@@ -289,10 +310,13 @@ class OllamaProvider(ModelProvider):
             ps_resp = await client.get("/api/ps")
             if ps_resp.status_code == 200:
                 ps_data = ps_resp.json()
-                for rm in ps_data.get("models", []):
+                raw_ps_models = ps_data.get("models", [])
+                for rm in raw_ps_models:
                     m_key = rm.get("model") or rm.get("name")
                     if m_key:
                         resident_map[m_key] = rm
+                if self._resource_manager is not None:
+                    await self._resource_manager.reconcile_with_daemon(raw_ps_models)
         except Exception as ps_err:
             logger.debug(f"Non-fatal error reading Ollama /api/ps: {ps_err}")
 
@@ -325,7 +349,16 @@ class OllamaProvider(ModelProvider):
                 estimated_memory = vram if (isinstance(vram, int) and vram >= 0) else None
             else:
                 status = ModelAvailabilityStatus.AVAILABLE
-                estimated_memory = None
+                if self._resource_manager is not None:
+                    ctx_to_est = verified_context or self.DEFAULT_CONTEXT_WINDOW
+                    est = self._resource_manager.estimator.estimate_model_memory(
+                        raw_id,
+                        context_length=ctx_to_est,
+                        arch_metadata=details,
+                    )
+                    estimated_memory = est.total_estimated_bytes
+                else:
+                    estimated_memory = None
 
             # Disk size kept in metadata, separated from memory
             disk_size = raw.get("size")
@@ -457,6 +490,9 @@ class OllamaProvider(ModelProvider):
                     f"Model '{native_id}' unload reported by daemon but model remains resident"
                 )
 
+            if self._resource_manager is not None:
+                await self._resource_manager.clear_model_resident(native_id)
+
             tracker.unload_future.set_result(True)
             logger.info(f"Successfully evicted model '{native_id}' from Ollama memory")
             return True
@@ -470,8 +506,51 @@ class OllamaProvider(ModelProvider):
                 tracker.unload_future = None
 
     async def stream_inference(self, request: InferenceRequest) -> AsyncIterator[TokenDelta]:
-        """Stream token deltas from Ollama while enforcing leases, limits, and cancellation."""
+        """Stream token deltas from Ollama with leases, limits, safeguards, and cancellation."""
         native_id = self._resolve_native_id(request.model_id)
+
+        if self._resource_manager is not None:
+            req_ctx = request.config.extra_params.get("num_ctx")
+            async with self._resource_manager.reserve_inference(
+                model_id=native_id,
+                request_id=request.request_id,
+                requested_context=req_ctx,
+                provider_unload_callable=self.unload_model,
+            ) as admission:
+                if admission.outcome == AdmissionOutcome.DEFER:
+                    raise AdmissionDeferredError(admission.reason)
+                if admission.outcome in (AdmissionOutcome.REJECT, AdmissionOutcome.REQUIRE_UNLOAD):
+                    raise InsufficientMemoryError(admission.reason)
+
+                inner = self._stream_with_tracker(
+                    request=request,
+                    native_id=native_id,
+                    allocated_context=admission.allocated_context,
+                )
+                try:
+                    async for delta in inner:
+                        yield delta
+                finally:
+                    await inner.aclose()
+        else:
+            inner = self._stream_with_tracker(
+                request=request,
+                native_id=native_id,
+                allocated_context=None,
+            )
+            try:
+                async for delta in inner:
+                    yield delta
+            finally:
+                await inner.aclose()
+
+    async def _stream_with_tracker(
+        self,
+        request: InferenceRequest,
+        native_id: str,
+        allocated_context: int | None,
+    ) -> AsyncIterator[TokenDelta]:
+        """Stream inference tokens under tracker leases and context constraints."""
         tracker = await self._get_or_create_tracker(native_id)
         cancel_event = asyncio.Event()
 
@@ -494,6 +573,7 @@ class OllamaProvider(ModelProvider):
         async with self._requests_lock:
             self._active_requests[request.request_id] = req_ctx
 
+        confirmed_loaded = False
         try:
             # Check early cancellation before network setup
             if cancel_event.is_set():
@@ -502,7 +582,11 @@ class OllamaProvider(ModelProvider):
 
             # 2. Build payload with context safeguards
             verified_capacity = self._model_context_capacities.get(native_id)
-            options = self._build_options(request.config, verified_capacity=verified_capacity)
+            options = self._build_options(
+                request.config,
+                verified_capacity=verified_capacity,
+                allocated_context=allocated_context,
+            )
             messages_payload = [
                 {
                     "role": m.role.value if hasattr(m.role, "value") else str(m.role),
@@ -575,6 +659,13 @@ class OllamaProvider(ModelProvider):
                                 f"Inference inter-token timeout ({self._inter_token_timeout}s) "
                                 "exceeded"
                             ) from err
+
+                        if not confirmed_loaded and self._resource_manager is not None:
+                            confirmed_loaded = True
+                            await self._resource_manager.confirm_model_loaded(
+                                native_id,
+                                verified_context=options["num_ctx"],
+                            )
 
                         buffer.extend(chunk)
 

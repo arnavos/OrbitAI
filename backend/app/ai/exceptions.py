@@ -178,3 +178,51 @@ class InferenceTimeoutError(AIError):
             status_code=status.HTTP_504_GATEWAY_TIMEOUT,
             details=details,
         )
+
+
+class InsufficientMemoryError(AIError):
+    """Raised when available memory cannot satisfy minimum model or context requirements."""
+
+    def __init__(
+        self,
+        message: str = "Insufficient memory available to admit model execution",
+        details: dict[str, Any] | None = None,
+    ):
+        super().__init__(
+            message=message,
+            code="INSUFFICIENT_MEMORY",
+            status_code=status.HTTP_507_INSUFFICIENT_STORAGE,
+            details=details,
+        )
+
+
+class AdmissionDeferredError(AIError):
+    """Raised when request must wait for active leases to drain or pressure to subside."""
+
+    def __init__(
+        self,
+        message: str = "Admission deferred due to in-flight leases or transient pressure",
+        details: dict[str, Any] | None = None,
+    ):
+        super().__init__(
+            message=message,
+            code="ADMISSION_DEFERRED",
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            details=details,
+        )
+
+
+class MemoryPressureCriticalError(AIError):
+    """Raised when the host is under critical memory pressure and cannot accept work."""
+
+    def __init__(
+        self,
+        message: str = "System is under critical memory pressure; model admission blocked",
+        details: dict[str, Any] | None = None,
+    ):
+        super().__init__(
+            message=message,
+            code="SYSTEM_MEMORY_PRESSURE_CRITICAL",
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            details=details,
+        )
