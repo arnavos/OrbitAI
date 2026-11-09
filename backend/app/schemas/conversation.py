@@ -94,3 +94,11 @@ class SendMessageResponse(BaseModel):
 
     user_message: MessageResponse
     assistant_message: MessageResponse
+
+
+class CancelTurnResponse(BaseModel):
+    """Response payload for explicit turn cancellation."""
+
+    cancelled: bool = Field(..., description="Whether an active turn was cancelled")
+    message_id: str | None = Field(default=None, description="Message ID of the cancelled turn")
+    detail: str = Field(..., description="Status description of the cancellation action")

@@ -1,13 +1,17 @@
 """FastAPI routes for conversation thread management and synchronous messaging."""
 
-from fastapi import APIRouter, Depends, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.ai.exceptions import ConversationNotFoundError
 from app.core.logging import get_correlation_id
 from app.core.security import require_session_auth
 from app.db.session import async_session_factory, get_db
+from app.models.conversation import Conversation
 from app.schemas.common import APIResponse
 from app.schemas.conversation import (
+    CancelTurnResponse,
     ConversationCreate,
     ConversationListResponse,
     ConversationResponse,
@@ -167,9 +171,10 @@ async def send_message(
         registry = ModelRegistry()
 
     resource_manager = getattr(request.app.state, "resource_manager", None)
+    session_factory = getattr(request.app.state, "session_factory", async_session_factory)
 
     result = await ConversationService.send_message(
-        session_factory=async_session_factory,
+        session_factory=session_factory,
         conversation_id=conversation_id,
         payload=payload,
         registry=registry,
@@ -179,5 +184,83 @@ async def send_message(
     return APIResponse[SendMessageResponse](
         success=True,
         data=result,
+        correlation_id=get_correlation_id(),
+    )
+
+
+@router.post(
+    "/{conversation_id}/messages/stream",
+    summary="Send user message and stream assistant response via Server-Sent Events",
+)
+async def send_message_stream(
+    conversation_id: str,
+    payload: SendMessageRequest,
+    request: Request,
+) -> StreamingResponse:
+    """Submit user prompt and stream model inference token deltas over Server-Sent Events."""
+    if not payload.content.strip():
+        raise HTTPException(
+            status_code=getattr(
+                status, "HTTP_422_UNPROCESSABLE_CONTENT", status.HTTP_422_UNPROCESSABLE_ENTITY
+            ),
+            detail="User message content cannot be empty",
+        )
+
+    session_factory = getattr(request.app.state, "session_factory", async_session_factory)
+    async with session_factory() as session:
+        conv = await session.get(Conversation, conversation_id)
+        if not conv:
+            raise ConversationNotFoundError(f"Conversation '{conversation_id}' not found")
+
+    registry = getattr(request.app.state, "model_registry", None)
+    if registry is None:
+        from app.ai.registry import ModelRegistry
+
+        registry = ModelRegistry()
+
+    resource_manager = getattr(request.app.state, "resource_manager", None)
+
+    event_generator = ConversationService.send_message_stream(
+        session_factory=session_factory,
+        conversation_id=conversation_id,
+        payload=payload,
+        registry=registry,
+        resource_manager=resource_manager,
+        disconnect_check=request.is_disconnected,
+    )
+
+    return StreamingResponse(
+        event_generator,
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@router.post(
+    "/{conversation_id}/cancel",
+    response_model=APIResponse[CancelTurnResponse],
+    summary="Explicitly cancel an active inference generation on a conversation",
+)
+async def cancel_turn(
+    conversation_id: str,
+    request: Request,
+) -> APIResponse[CancelTurnResponse]:
+    """Explicitly cancel active inference turn for the specified conversation thread."""
+    session_factory = getattr(request.app.state, "session_factory", async_session_factory)
+    cancelled, message_id, detail = await ConversationService.cancel_turn(
+        session_factory=session_factory,
+        conversation_id=conversation_id,
+    )
+    return APIResponse[CancelTurnResponse](
+        success=True,
+        data=CancelTurnResponse(
+            cancelled=cancelled,
+            message_id=message_id,
+            detail=detail,
+        ),
         correlation_id=get_correlation_id(),
     )

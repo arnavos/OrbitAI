@@ -775,10 +775,183 @@
           }
         }
       }
+    },
+    "/api/v1/conversations/{conversation_id}/messages/stream": {
+      "post": {
+        "tags": [
+          "Conversations"
+        ],
+        "summary": "Send user message and stream assistant response via Server-Sent Events",
+        "description": "Submit user prompt and stream model inference token deltas over Server-Sent Events.",
+        "operationId": "send_message_stream_api_v1_conversations__conversation_id__messages_stream_post",
+        "parameters": [
+          {
+            "name": "conversation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Conversation Id"
+            }
+          },
+          {
+            "name": "x-orbit-session-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Orbit-Session-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SendMessageRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/conversations/{conversation_id}/cancel": {
+      "post": {
+        "tags": [
+          "Conversations"
+        ],
+        "summary": "Explicitly cancel an active inference generation on a conversation",
+        "description": "Explicitly cancel active inference turn for the specified conversation thread.",
+        "operationId": "cancel_turn_api_v1_conversations__conversation_id__cancel_post",
+        "parameters": [
+          {
+            "name": "conversation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Conversation Id"
+            }
+          },
+          {
+            "name": "x-orbit-session-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Orbit-Session-Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIResponse_CancelTurnResponse_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
     "schemas": {
+      "APIResponse_CancelTurnResponse_": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "description": "True if operation succeeded, false otherwise"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CancelTurnResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Payload data returned on success"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ErrorDetail"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Error information on failure"
+          },
+          "correlation_id": {
+            "type": "string",
+            "title": "Correlation Id",
+            "description": "Unique request tracing ID"
+          },
+          "timestamp": {
+            "type": "string",
+            "title": "Timestamp",
+            "description": "ISO 8601 UTC timestamp of response generation"
+          }
+        },
+        "type": "object",
+        "required": [
+          "success",
+          "correlation_id"
+        ],
+        "title": "APIResponse[CancelTurnResponse]"
+      },
       "APIResponse_ConversationListResponse_": {
         "properties": {
           "success": {
@@ -1299,6 +1472,39 @@
         ],
         "title": "AuditEventResponse",
         "description": "Audit event record."
+      },
+      "CancelTurnResponse": {
+        "properties": {
+          "cancelled": {
+            "type": "boolean",
+            "title": "Cancelled",
+            "description": "Whether an active turn was cancelled"
+          },
+          "message_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message Id",
+            "description": "Message ID of the cancelled turn"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail",
+            "description": "Status description of the cancellation action"
+          }
+        },
+        "type": "object",
+        "required": [
+          "cancelled",
+          "detail"
+        ],
+        "title": "CancelTurnResponse",
+        "description": "Response payload for explicit turn cancellation."
       },
       "ConversationCreate": {
         "properties": {

@@ -200,10 +200,72 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/conversations/{conversation_id}/messages/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Send user message and stream assistant response via Server-Sent Events
+         * @description Submit user prompt and stream model inference token deltas over Server-Sent Events.
+         */
+        post: operations["send_message_stream_api_v1_conversations__conversation_id__messages_stream_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/conversations/{conversation_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Explicitly cancel an active inference generation on a conversation
+         * @description Explicitly cancel active inference turn for the specified conversation thread.
+         */
+        post: operations["cancel_turn_api_v1_conversations__conversation_id__cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** APIResponse[CancelTurnResponse] */
+        APIResponse_CancelTurnResponse_: {
+            /**
+             * Success
+             * @description True if operation succeeded, false otherwise
+             */
+            success: boolean;
+            /** @description Payload data returned on success */
+            data?: components["schemas"]["CancelTurnResponse"] | null;
+            /** @description Error information on failure */
+            error?: components["schemas"]["ErrorDetail"] | null;
+            /**
+             * Correlation Id
+             * @description Unique request tracing ID
+             */
+            correlation_id: string;
+            /**
+             * Timestamp
+             * @description ISO 8601 UTC timestamp of response generation
+             */
+            timestamp?: string;
+        };
         /** APIResponse[ConversationListResponse] */
         APIResponse_ConversationListResponse_: {
             /**
@@ -454,6 +516,27 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+        };
+        /**
+         * CancelTurnResponse
+         * @description Response payload for explicit turn cancellation.
+         */
+        CancelTurnResponse: {
+            /**
+             * Cancelled
+             * @description Whether an active turn was cancelled
+             */
+            cancelled: boolean;
+            /**
+             * Message Id
+             * @description Message ID of the cancelled turn
+             */
+            message_id?: string | null;
+            /**
+             * Detail
+             * @description Status description of the cancellation action
+             */
+            detail: string;
         };
         /**
          * ConversationCreate
@@ -1216,6 +1299,76 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["APIResponse_SendMessageResponse_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    send_message_stream_api_v1_conversations__conversation_id__messages_stream_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-orbit-session-token"?: string | null;
+            };
+            path: {
+                conversation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SendMessageRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cancel_turn_api_v1_conversations__conversation_id__cancel_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-orbit-session-token"?: string | null;
+            };
+            path: {
+                conversation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIResponse_CancelTurnResponse_"];
                 };
             };
             /** @description Validation Error */

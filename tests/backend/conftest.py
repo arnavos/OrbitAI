@@ -89,10 +89,13 @@ async def async_client(db_session: AsyncSession) -> AsyncGenerator[AsyncClient]:
         yield db_session
 
     app.dependency_overrides[get_db] = override_get_db
+    app.state.session_factory = TestingSessionLocal
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         yield client
     app.dependency_overrides.clear()
+    if hasattr(app.state, "session_factory"):
+        del app.state.session_factory
 
 
 @pytest.fixture
