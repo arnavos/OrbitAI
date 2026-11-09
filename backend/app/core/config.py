@@ -35,9 +35,9 @@ class Settings(BaseSettings):
 
     # Security
     session_token: str | None = Field(
-        default=None,
+        default="dev-session-token",
         validation_alias="ORBIT_SESSION_TOKEN",
-        description="Ephemeral session token passed by Tauri host",
+        description="Ephemeral session token passed by Tauri host or development default",
     )
     session_token_file: str | None = Field(
         default=None,
@@ -344,6 +344,17 @@ class Settings(BaseSettings):
                 with contextlib.suppress(OSError):
                     os.close(fd)
 
+        return self
+
+    @model_validator(mode="after")
+    def validate_production_token(self) -> Self:
+        """Reject default development token when running in production."""
+        if self.app_env == "production" and self.session_token == "dev-session-token":
+            msg = (
+                "Security violation: Default development session token is "
+                "strictly prohibited in production."
+            )
+            raise ValueError(msg)
         return self
 
     def setup_directories(self) -> None:

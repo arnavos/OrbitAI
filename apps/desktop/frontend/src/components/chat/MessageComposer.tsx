@@ -1,13 +1,22 @@
 import React, { useRef, useEffect } from 'react';
 import { useStreamingChat } from '../../hooks/useStreamingChat';
-import { ArrowUp, Square } from 'lucide-react';
+import { ArrowUp, Square, AlertCircle, X } from 'lucide-react';
 
 export interface MessageComposerProps {
   onSendMessage?: (content: string) => void;
 }
 
 export const MessageComposer: React.FC<MessageComposerProps> = ({ onSendMessage }) => {
-  const { draft, updateDraft, sendMessage, cancelStreaming, isStreaming } = useStreamingChat();
+  const {
+    draft,
+    updateDraft,
+    sendMessage,
+    cancelStreaming,
+    isStreaming,
+    isSubmitting,
+    error,
+    clearError,
+  } = useStreamingChat();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Auto-resize textarea height
@@ -26,10 +35,11 @@ export const MessageComposer: React.FC<MessageComposerProps> = ({ onSendMessage 
   };
 
   const tokenEstimate = estimateTokens(draft);
+  const isSendDisabled = !draft.trim() || isStreaming || Boolean(isSubmitting);
 
   const handleSubmit = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    if (!draft.trim() || isStreaming) return;
+    if (isSendDisabled) return;
     const textToSend = draft;
     if (onSendMessage) {
       onSendMessage(textToSend);
@@ -54,6 +64,46 @@ export const MessageComposer: React.FC<MessageComposerProps> = ({ onSendMessage 
         margin: '0 auto',
       }}
     >
+      {error && (
+        <div
+          role="alert"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '8px 12px',
+            backgroundColor: 'rgba(239, 68, 68, 0.12)',
+            border: '1px solid var(--status-error)',
+            borderRadius: 'var(--radius-md)',
+            color: 'var(--status-error)',
+            fontSize: '12px',
+            marginBottom: '8px',
+            gap: '8px',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <AlertCircle size={15} style={{ flexShrink: 0 }} />
+            <span>{error}</span>
+          </div>
+          <button
+            type="button"
+            onClick={clearError}
+            aria-label="Dismiss error"
+            style={{
+              background: 'none',
+              border: 'none',
+              color: 'var(--status-error)',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              padding: '2px',
+            }}
+          >
+            <X size={14} />
+          </button>
+        </div>
+      )}
+
       <form
         onSubmit={handleSubmit}
         style={{
@@ -75,7 +125,7 @@ export const MessageComposer: React.FC<MessageComposerProps> = ({ onSendMessage 
           onKeyDown={handleKeyDown}
           placeholder="Ask ORBIT anything... (Shift+Enter for newline)"
           rows={1}
-          disabled={isStreaming}
+          disabled={isStreaming || Boolean(isSubmitting)}
           style={{
             width: '100%',
             backgroundColor: 'transparent',
@@ -140,7 +190,7 @@ export const MessageComposer: React.FC<MessageComposerProps> = ({ onSendMessage 
             ) : (
               <button
                 type="submit"
-                disabled={!draft.trim() || isStreaming}
+                disabled={isSendDisabled}
                 style={{
                   display: 'flex',
                   alignItems: 'center',
@@ -148,10 +198,10 @@ export const MessageComposer: React.FC<MessageComposerProps> = ({ onSendMessage 
                   width: '30px',
                   height: '30px',
                   borderRadius: '50%',
-                  backgroundColor: draft.trim() ? 'var(--accent-primary)' : 'var(--bg-tertiary)',
-                  color: draft.trim() ? '#ffffff' : 'var(--text-muted)',
+                  backgroundColor: !isSendDisabled ? 'var(--accent-primary)' : 'var(--bg-tertiary)',
+                  color: !isSendDisabled ? '#ffffff' : 'var(--text-muted)',
                   border: 'none',
-                  cursor: draft.trim() ? 'pointer' : 'not-allowed',
+                  cursor: !isSendDisabled ? 'pointer' : 'not-allowed',
                   transition: 'all 0.15s ease',
                 }}
                 aria-label="Send message"
@@ -165,3 +215,4 @@ export const MessageComposer: React.FC<MessageComposerProps> = ({ onSendMessage 
     </div>
   );
 };
+

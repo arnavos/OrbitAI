@@ -7,7 +7,7 @@ import { WelcomeScreen } from './WelcomeScreen';
 import { MessageComposer } from './MessageComposer';
 
 export const ChatWorkspace: React.FC = () => {
-  const { messages, streamingState, updateDraft, sendMessage } = useStreamingChat();
+  const { messages, streamingState, updateDraft } = useStreamingChat();
   const { activeConversationId } = useConversations();
 
   const isStreamingHere =
@@ -52,7 +52,7 @@ export const ChatWorkspace: React.FC = () => {
           <WelcomeScreen onSelectPrompt={handleSelectStarterPrompt} />
         )}
 
-        <MessageComposer onSendMessage={(content) => sendMessage(content)} />
+        <MessageComposer />
       </main>
     </div>
   );

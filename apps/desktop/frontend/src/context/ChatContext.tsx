@@ -26,6 +26,8 @@ interface ChatState {
   modelError: string | null;
   drafts: Record<string, string>;
   streamingState: ActiveStreamingState;
+  isSubmitting: boolean;
+  error: string | null;
 }
 
 type ChatAction =
@@ -35,6 +37,8 @@ type ChatAction =
   | { type: 'SET_SEARCH_QUERY'; payload: string }
   | { type: 'SET_SELECTED_MODEL'; payload: string }
   | { type: 'SET_DRAFT'; payload: { conversationId: string; text: string } }
+  | { type: 'SET_SUBMITTING'; payload: boolean }
+  | { type: 'SET_ERROR'; payload: string | null }
   | { type: 'SET_LOADING_CONVERSATIONS'; payload: boolean }
   | { type: 'SET_CONVERSATIONS'; payload: ConversationResponse[] }
   | { type: 'ADD_CONVERSATION'; payload: ConversationResponse }
@@ -50,7 +54,14 @@ type ChatAction =
     }
   | { type: 'SET_LOADING_MODELS'; payload: boolean }
   | { type: 'SET_MODELS'; payload: { models: ModelDescriptorResponse[]; error?: string | null } }
-  | { type: 'START_STREAMING'; payload: { conversationId: string; abortController: AbortController } }
+  | {
+      type: 'START_STREAMING';
+      payload: {
+        conversationId: string;
+        assistantMessageId: string;
+        abortController: AbortController;
+      };
+    }
   | {
       type: 'STREAM_STARTED';
       payload: {
@@ -106,6 +117,8 @@ const initialState: ChatState = {
   modelError: null,
   drafts: {},
   streamingState: initialStreamingState,
+  isSubmitting: false,
+  error: null,
 };
 
 function chatReducer(state: ChatState, action: ChatAction): ChatState {
@@ -133,6 +146,12 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
           [action.payload.conversationId]: action.payload.text,
         },
       };
+
+    case 'SET_SUBMITTING':
+      return { ...state, isSubmitting: action.payload };
+
+    case 'SET_ERROR':
+      return { ...state, error: action.payload };
 
     case 'SET_LOADING_CONVERSATIONS':
       return { ...state, isLoadingConversations: action.payload };
@@ -244,10 +263,12 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
     case 'START_STREAMING':
       return {
         ...state,
+        isSubmitting: false,
+        error: null,
         streamingState: {
           isStreaming: true,
           conversationId: action.payload.conversationId,
-          messageId: null,
+          messageId: action.payload.assistantMessageId,
           accumulatedText: '',
           tokenCount: 0,
           allocatedContext: null,
@@ -323,6 +344,8 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
 
       return {
         ...state,
+        isSubmitting: false,
+        error: action.payload.status === 'failed' ? action.payload.error || 'Generation failed' : null,
         messagesByConversation: {
           ...state.messagesByConversation,
           [convId]: updatedMsgs,
@@ -353,6 +376,7 @@ interface ChatContextType {
   refreshModels: () => Promise<void>;
   sendStreamingMessage: (content: string) => Promise<void>;
   cancelStreaming: () => Promise<void>;
+  clearError: () => void;
 }
 
 const ChatContext = createContext<ChatContextType | undefined>(undefined);
@@ -465,18 +489,40 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const sendStreamingMessage = async (content: string) => {
-    if (!content.trim() || state.streamingState.isStreaming) return;
+    const trimmed = content.trim();
+    if (!trimmed || state.streamingState.isStreaming || state.isSubmitting) return;
+
+    const modelToUse = state.selectedModelId;
+    if (!modelToUse) {
+      dispatch({
+        type: 'SET_ERROR',
+        payload: 'No AI model selected. Please select a model from the toolbar.',
+      });
+      return;
+    }
+
+    dispatch({ type: 'SET_SUBMITTING', payload: true });
+    dispatch({ type: 'SET_ERROR', payload: null });
 
     let targetConvId = state.activeConversationId;
     if (!targetConvId) {
-      const firstLine = content.trim().split('\n')[0].slice(0, 40);
-      const title = firstLine.length > 0 ? firstLine : 'New Conversation';
-      const created = await createConversation(title, state.selectedModelId);
-      targetConvId = created.id;
+      try {
+        const firstLine = trimmed.split('\n')[0].slice(0, 40);
+        const title = firstLine.length > 0 ? firstLine : 'New Conversation';
+        const created = await createConversation(title, modelToUse);
+        targetConvId = created.id;
+      } catch (err: unknown) {
+        dispatch({ type: 'SET_SUBMITTING', payload: false });
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        dispatch({
+          type: 'SET_ERROR',
+          payload: `Failed to create conversation: ${errorMsg}`,
+        });
+        return;
+      }
     }
 
     const convId = targetConvId;
-    const modelToUse = state.selectedModelId;
 
     // Optimistic user message
     const tempUserMsgId = `temp-user-${Date.now()}`;
@@ -485,7 +531,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
       conversation_id: convId,
       sequence: 9999,
       role: 'user',
-      content,
+      content: trimmed,
       status: 'completed',
       model_id: modelToUse,
       finish_reason: null,
@@ -500,8 +546,9 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
       payload: { conversationId: convId, message: userMessage },
     });
 
-    // Clear draft for this conversation
+    // Clear draft for this conversation and the 'new' draft
     dispatch({ type: 'SET_DRAFT', payload: { conversationId: convId, text: '' } });
+    dispatch({ type: 'SET_DRAFT', payload: { conversationId: 'new', text: '' } });
 
     // Placeholder assistant message
     const tempAssistantId = `temp-assistant-${Date.now()}`;
@@ -527,7 +574,14 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const controller = new AbortController();
     activeAbortControllerRef.current = controller;
-    dispatch({ type: 'START_STREAMING', payload: { conversationId: convId, abortController: controller } });
+    dispatch({
+      type: 'START_STREAMING',
+      payload: {
+        conversationId: convId,
+        assistantMessageId: tempAssistantId,
+        abortController: controller,
+      },
+    });
 
     const callbacks: StreamCallbacks = {
       onStarted: (payload) => {
@@ -592,7 +646,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
           payload: {
             conversationId: convId,
             status: 'failed',
-            error: payload.error_message,
+            error: payload.error_message || (payload as any).error,
           },
         });
       },
@@ -645,6 +699,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     refreshModels,
     sendStreamingMessage,
     cancelStreaming,
+    clearError: () => dispatch({ type: 'SET_ERROR', payload: null }),
   };
 
   return <ChatContext.Provider value={contextValue}>{children}</ChatContext.Provider>;
@@ -657,3 +712,4 @@ export function useChat(): ChatContextType {
   }
   return context;
 }
+

@@ -79,7 +79,15 @@ export class BackendClient {
     }
 
     if (!this.isDesktop()) {
-      return null;
+      const devPort = '18420';
+      const devToken = 'dev-session-token';
+      const devInfo: BackendConnectionInfo = {
+        apiUrl: `http://127.0.0.1:${devPort}`,
+        wsUrl: `ws://127.0.0.1:${devPort}/api/v1/ws`,
+        sessionToken: devToken,
+      };
+      this.connection = devInfo;
+      return devInfo;
     }
 
     if (this.isInitializing) {
@@ -116,7 +124,7 @@ export class BackendClient {
    */
   async fetch<T>(path: string, options: RequestInit = {}): Promise<T> {
     const conn = await this.getConnection();
-    const baseUrl = conn?.apiUrl || 'http://127.0.0.1:8000';
+    const baseUrl = conn?.apiUrl || 'http://127.0.0.1:18420';
     const headers = new Headers(options.headers || {});
 
     if (conn?.sessionToken) {

@@ -22,7 +22,12 @@ export function useBackend(): UseBackendState {
 
     async function init() {
       if (!backendClient.isDesktop()) {
+        const conn = await backendClient.getConnection();
         if (isMounted) {
+          if (conn) {
+            setConnection(conn);
+            setPort('18420');
+          }
           setStatus('STANDALONE DEV');
         }
         return;

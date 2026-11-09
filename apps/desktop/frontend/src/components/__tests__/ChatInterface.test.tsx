@@ -14,6 +14,7 @@ import { TitleBar } from '../layout/TitleBar';
 import type { ConversationResponse, MessageResponse } from '../../types/conversation';
 import * as convServiceModule from '../../services/conversation';
 import * as modelServiceModule from '../../services/models';
+import { StreamingConversationClient } from '../../services/streaming';
 
 describe('ORBIT Desktop Chat Interface Suite', () => {
   const mockConversations: ConversationResponse[] = [
@@ -574,5 +575,474 @@ describe('ORBIT Desktop Chat Interface Suite', () => {
     });
 
     expect(screen.getByRole('button', { expanded: false })).toBeInTheDocument();
+  });
+
+  // --------------------------------------------------------------------------
+  // Message Composer & Submission Lifecycle Suite (Requirements 1-10)
+  // --------------------------------------------------------------------------
+  describe('Message Composer & Submission Lifecycle (Requirements 1-10)', () => {
+    // 1. Empty input -> Send button disabled
+    it('Requirement 1: Send button is disabled when input is empty', async () => {
+      render(
+        <ChatProvider>
+          <MessageComposer />
+        </ChatProvider>
+      );
+      const sendBtn = screen.getByRole('button', { name: /Send message/i });
+      expect(sendBtn).toBeDisabled();
+    });
+
+    // 2. Whitespace input -> Send button disabled
+    it('Requirement 2: Send button is disabled when input contains only whitespace', async () => {
+      render(
+        <ChatProvider>
+          <MessageComposer />
+        </ChatProvider>
+      );
+      const textarea = screen.getByPlaceholderText(/Ask ORBIT anything/);
+      fireEvent.change(textarea, { target: { value: '   \n\t  ' } });
+      const sendBtn = screen.getByRole('button', { name: /Send message/i });
+      expect(sendBtn).toBeDisabled();
+    });
+
+    // 3. Valid text entered -> Send button enabled
+    it('Requirement 3: Send button is enabled when valid text is typed', async () => {
+      render(
+        <ChatProvider>
+          <MessageComposer />
+        </ChatProvider>
+      );
+      const textarea = screen.getByPlaceholderText(/Ask ORBIT anything/);
+      fireEvent.change(textarea, { target: { value: 'Valid prompt text' } });
+      const sendBtn = screen.getByRole('button', { name: /Send message/i });
+      expect(sendBtn).not.toBeDisabled();
+    });
+
+    // 4. Missing conversation -> creates conversation before submission
+    it('Requirement 4: Automatically creates conversation before submission when activeConversationId is null', async () => {
+      const createConvSpy = vi
+        .spyOn(convServiceModule.conversationService, 'createConversation')
+        .mockResolvedValue({
+          id: 'new-conv-uuid',
+          title: 'Hello from user',
+          model_id: 'ollama/llama3.2:3b',
+          last_sequence: 0,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          message_count: 0,
+        });
+
+      let capturedConvId: string | null = null;
+      vi.spyOn(StreamingConversationClient.prototype, 'streamMessage').mockImplementation(
+        async (convId, _content, callbacks) => {
+          capturedConvId = convId;
+          const controller = new AbortController();
+          setTimeout(() => {
+            callbacks.onCompleted?.(
+              {
+                finish_reason: 'stop',
+                usage: { prompt_tokens: 5, completion_tokens: 2, total_tokens: 7 },
+              } as any,
+              {} as any
+            );
+          }, 10);
+          return controller;
+        }
+      );
+
+      const TestView = () => {
+        const { state } = useChat();
+        return (
+          <div>
+            <div data-testid="active-conv">{state.activeConversationId || 'NONE'}</div>
+            <MessageComposer />
+          </div>
+        );
+      };
+
+      render(
+        <ChatProvider>
+          <TestView />
+        </ChatProvider>
+      );
+
+      expect(screen.getByTestId('active-conv')).toHaveTextContent('NONE');
+
+      const textarea = screen.getByPlaceholderText(/Ask ORBIT anything/);
+      fireEvent.change(textarea, { target: { value: 'Hello from user' } });
+
+      const sendBtn = screen.getByRole('button', { name: /Send message/i });
+      expect(sendBtn).not.toBeDisabled();
+
+      await act(async () => {
+        fireEvent.click(sendBtn);
+      });
+
+      expect(createConvSpy).toHaveBeenCalled();
+      expect(capturedConvId).toBe('new-conv-uuid');
+    });
+
+    // 5. Missing model -> displays meaningful error without crashing
+    it('Requirement 5: Displays meaningful error banner when no model is selected', async () => {
+      const TestView = () => {
+        const { setSelectedModelId } = useChat();
+        return (
+          <div>
+            <button onClick={() => setSelectedModelId('')}>Clear Model</button>
+            <MessageComposer />
+          </div>
+        );
+      };
+
+      render(
+        <ChatProvider>
+          <TestView />
+        </ChatProvider>
+      );
+
+      fireEvent.click(screen.getByText('Clear Model'));
+
+      const textarea = screen.getByPlaceholderText(/Ask ORBIT anything/);
+      fireEvent.change(textarea, { target: { value: 'Prompt without model' } });
+
+      const sendBtn = screen.getByRole('button', { name: /Send message/i });
+      expect(sendBtn).not.toBeDisabled();
+
+      await act(async () => {
+        fireEvent.click(sendBtn);
+      });
+
+      expect(screen.getByRole('alert')).toBeInTheDocument();
+      expect(screen.getByText(/No AI model selected/i)).toBeInTheDocument();
+    });
+
+    // 6. Active generation -> Stop button displayed, Send disabled, textarea disabled
+    it('Requirement 6: Disables textarea and send button during active generation', async () => {
+      vi.spyOn(StreamingConversationClient.prototype, 'streamMessage').mockImplementation(
+        async (_convId, _content, callbacks) => {
+          const controller = new AbortController();
+          callbacks.onStarted?.(
+            {
+              user_message: {
+                id: 'u1',
+                content: 'hello',
+                role: 'user',
+                sequence: 1,
+                created_at: '',
+                conversation_id: 'conv-1',
+                status: 'completed',
+              },
+              assistant_message_id: 'a1',
+              assistant_sequence: 2,
+              model_id: 'ollama/llama3.2:3b',
+              allocated_context: 4096,
+              created_at: '',
+            },
+            {} as any
+          );
+          return controller;
+        }
+      );
+
+      const TestView = () => {
+        const { setActiveConversationId } = useChat();
+        return (
+          <div>
+            <button onClick={() => setActiveConversationId('conv-1')}>Select Conv</button>
+            <MessageComposer />
+          </div>
+        );
+      };
+
+      render(
+        <ChatProvider>
+          <TestView />
+        </ChatProvider>
+      );
+
+      fireEvent.click(screen.getByText('Select Conv'));
+
+      const textarea = screen.getByPlaceholderText(/Ask ORBIT anything/);
+      fireEvent.change(textarea, { target: { value: 'Streaming prompt' } });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /Send message/i }));
+      });
+
+      // While streaming, composer shows Stop button
+      expect(screen.getByRole('button', { name: /Stop generation/i })).toBeInTheDocument();
+      expect(textarea).toBeDisabled();
+    });
+
+    // 7. Completed generation -> Send button re-enabled when text present
+    it('Requirement 7: Re-enables Send button after stream completion', async () => {
+      let completeStream: (() => void) | null = null;
+      vi.spyOn(StreamingConversationClient.prototype, 'streamMessage').mockImplementation(
+        async (_convId, _content, callbacks) => {
+          const controller = new AbortController();
+          callbacks.onStarted?.(
+            {
+              user_message: {
+                id: 'u1',
+                content: 'test',
+                role: 'user',
+                sequence: 1,
+                created_at: '',
+                conversation_id: 'conv-1',
+                status: 'completed',
+              },
+              assistant_message_id: 'a1',
+              assistant_sequence: 2,
+              model_id: 'ollama/llama3.2:3b',
+              allocated_context: 4096,
+              created_at: '',
+            },
+            {} as any
+          );
+          completeStream = () => {
+            callbacks.onCompleted?.(
+              {
+                finish_reason: 'stop',
+                usage: { prompt_tokens: 5, completion_tokens: 3, total_tokens: 8 },
+              } as any,
+              {} as any
+            );
+          };
+          return controller;
+        }
+      );
+
+      const TestView = () => {
+        const { setActiveConversationId } = useChat();
+        return (
+          <div>
+            <button onClick={() => setActiveConversationId('conv-1')}>Select Conv</button>
+            <MessageComposer />
+          </div>
+        );
+      };
+
+      render(
+        <ChatProvider>
+          <TestView />
+        </ChatProvider>
+      );
+
+      fireEvent.click(screen.getByText('Select Conv'));
+      const textarea = screen.getByPlaceholderText(/Ask ORBIT anything/);
+      fireEvent.change(textarea, { target: { value: 'Testing stream complete' } });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /Send message/i }));
+      });
+
+      expect(screen.getByRole('button', { name: /Stop generation/i })).toBeInTheDocument();
+
+      // Complete stream
+      await act(async () => {
+        completeStream?.();
+      });
+
+      // After completion, textarea is enabled and typing enables Send button
+      expect(textarea).not.toBeDisabled();
+      fireEvent.change(textarea, { target: { value: 'Next prompt' } });
+      expect(screen.getByRole('button', { name: /Send message/i })).not.toBeDisabled();
+    });
+
+    // 8. Failed generation -> displays error banner in composer and error in message
+    it('Requirement 8: Displays error banner and restores retry capability on failed generation', async () => {
+      vi.spyOn(StreamingConversationClient.prototype, 'streamMessage').mockImplementation(
+        async (_convId, _content, callbacks) => {
+          const controller = new AbortController();
+          callbacks.onStarted?.(
+            {
+              user_message: {
+                id: 'u1',
+                content: 'fail prompt',
+                role: 'user',
+                sequence: 1,
+                created_at: '',
+                conversation_id: 'conv-1',
+                status: 'completed',
+              },
+              assistant_message_id: 'a1',
+              assistant_sequence: 2,
+              model_id: 'ollama/llama3.2:3b',
+              allocated_context: 4096,
+              created_at: '',
+            },
+            {} as any
+          );
+          callbacks.onFailed?.(
+            {
+              error_message: 'Inference engine out of memory',
+            } as any,
+            {} as any
+          );
+          return controller;
+        }
+      );
+
+      const TestView = () => {
+        const { setActiveConversationId } = useChat();
+        return (
+          <div>
+            <button onClick={() => setActiveConversationId('conv-1')}>Select Conv</button>
+            <MessageComposer />
+          </div>
+        );
+      };
+
+      render(
+        <ChatProvider>
+          <TestView />
+        </ChatProvider>
+      );
+
+      fireEvent.click(screen.getByText('Select Conv'));
+      const textarea = screen.getByPlaceholderText(/Ask ORBIT anything/);
+      fireEvent.change(textarea, { target: { value: 'fail prompt' } });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /Send message/i }));
+      });
+
+      expect(screen.getByRole('alert')).toBeInTheDocument();
+      expect(screen.getByText(/Inference engine out of memory/i)).toBeInTheDocument();
+      expect(textarea).not.toBeDisabled();
+    });
+
+    // 9. Cancelled generation -> Send button re-enabled
+    it('Requirement 9: Re-enables Send button after cancelling active generation', async () => {
+      let cancelCallback: (() => void) | null = null;
+      vi.spyOn(StreamingConversationClient.prototype, 'streamMessage').mockImplementation(
+        async (_convId, _content, callbacks) => {
+          const controller = new AbortController();
+          callbacks.onStarted?.(
+            {
+              user_message: {
+                id: 'u1',
+                content: 'cancel me',
+                role: 'user',
+                sequence: 1,
+                created_at: '',
+                conversation_id: 'conv-1',
+                status: 'completed',
+              },
+              assistant_message_id: 'a1',
+              assistant_sequence: 2,
+              model_id: 'ollama/llama3.2:3b',
+              allocated_context: 4096,
+              created_at: '',
+            },
+            {} as any
+          );
+          cancelCallback = () => {
+            callbacks.onCancelled?.(
+              {
+                accumulated_text: 'partial',
+                token_count: 1,
+              } as any,
+              {} as any
+            );
+          };
+          return controller;
+        }
+      );
+      vi.spyOn(StreamingConversationClient.prototype, 'cancelTurn').mockImplementation(async () => {
+        cancelCallback?.();
+        return { cancelled: true, message_id: 'a1', detail: 'Cancelled' };
+      });
+
+      const TestView = () => {
+        const { setActiveConversationId } = useChat();
+        return (
+          <div>
+            <button onClick={() => setActiveConversationId('conv-1')}>Select Conv</button>
+            <MessageComposer />
+          </div>
+        );
+      };
+
+      render(
+        <ChatProvider>
+          <TestView />
+        </ChatProvider>
+      );
+
+      fireEvent.click(screen.getByText('Select Conv'));
+      const textarea = screen.getByPlaceholderText(/Ask ORBIT anything/);
+      fireEvent.change(textarea, { target: { value: 'cancel me' } });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /Send message/i }));
+      });
+
+      const stopBtn = screen.getByRole('button', { name: /Stop generation/i });
+      expect(stopBtn).toBeInTheDocument();
+
+      await act(async () => {
+        fireEvent.click(stopBtn);
+      });
+
+      // Stop button disappears, composer is restored
+      expect(screen.queryByRole('button', { name: /Stop generation/i })).not.toBeInTheDocument();
+      expect(textarea).not.toBeDisabled();
+    });
+
+    // 10. Enter vs Shift+Enter keyboard handling
+    it('Requirement 10: Enter submits valid text, Shift+Enter inserts newline without submitting', async () => {
+      let streamCalled = false;
+      vi.spyOn(StreamingConversationClient.prototype, 'streamMessage').mockImplementation(
+        async (_convId, _content, callbacks) => {
+          streamCalled = true;
+          const controller = new AbortController();
+          setTimeout(() => {
+            callbacks.onCompleted?.(
+              {
+                finish_reason: 'stop',
+                usage: { prompt_tokens: 5, completion_tokens: 1, total_tokens: 6 },
+              } as any,
+              {} as any
+            );
+          }, 10);
+          return controller;
+        }
+      );
+
+      const TestView = () => {
+        const { setActiveConversationId } = useChat();
+        return (
+          <div>
+            <button onClick={() => setActiveConversationId('conv-1')}>Select Conv</button>
+            <MessageComposer />
+          </div>
+        );
+      };
+
+      render(
+        <ChatProvider>
+          <TestView />
+        </ChatProvider>
+      );
+
+      fireEvent.click(screen.getByText('Select Conv'));
+      const textarea = screen.getByPlaceholderText(/Ask ORBIT anything/);
+
+      // Empty enter does nothing
+      fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false });
+      expect(streamCalled).toBe(false);
+
+      // Shift+Enter does nothing
+      fireEvent.change(textarea, { target: { value: 'Line 1' } });
+      fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: true });
+      expect(streamCalled).toBe(false);
+
+      // Enter alone submits
+      await act(async () => {
+        fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false });
+      });
+      expect(streamCalled).toBe(true);
+    });
   });
 });

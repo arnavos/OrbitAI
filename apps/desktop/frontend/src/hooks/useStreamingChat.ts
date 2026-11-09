@@ -8,6 +8,7 @@ export function useStreamingChat() {
     sendStreamingMessage,
     cancelStreaming,
     setDraft,
+    clearError,
   } = useChat();
 
   const activeMessages: MessageResponse[] = useMemo(() => {
@@ -30,9 +31,14 @@ export function useStreamingChat() {
     isLoadingMessages: state.isLoadingMessages,
     streamingState: state.streamingState,
     isStreaming: state.streamingState.isStreaming,
+    isSubmitting: state.isSubmitting,
+    selectedModelId: state.selectedModelId,
+    error: state.error,
+    clearError,
     draft: activeDraft,
     updateDraft,
     sendMessage: sendStreamingMessage,
     cancelStreaming,
   };
 }
+
