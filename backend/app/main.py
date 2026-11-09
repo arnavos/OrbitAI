@@ -102,6 +102,16 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
         logger.error(f"Fatal error during database initialization: {e}")
         raise
 
+    # 3b. Reconcile dangling in-flight messages from prior unexpected shutdown
+    try:
+        from app.db.session import async_session_factory
+        from app.services.conversation_service import ConversationService
+
+        async with async_session_factory() as session:
+            await ConversationService.reconcile_crashed_generations(session)
+    except Exception as exc:
+        logger.warning(f"Non-fatal error reconciling dangling messages: {exc}")
+
     # 4. Initialize Resource Manager, AI Model Registry & local Ollama provider
     resource_policy = MemoryPressurePolicy(
         os_safety_reserve_bytes=settings.resource_os_safety_reserve_bytes,

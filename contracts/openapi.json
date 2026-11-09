@@ -306,10 +306,573 @@
           }
         }
       }
+    },
+    "/api/v1/conversations": {
+      "post": {
+        "tags": [
+          "Conversations"
+        ],
+        "summary": "Create a new conversation thread",
+        "description": "Initialize and persist a new conversation thread.",
+        "operationId": "create_conversation_api_v1_conversations_post",
+        "parameters": [
+          {
+            "name": "x-orbit-session-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Orbit-Session-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConversationCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIResponse_ConversationResponse_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Conversations"
+        ],
+        "summary": "List conversation threads",
+        "description": "Retrieve paginated conversation threads ordered by last updated timestamp.",
+        "operationId": "list_conversations_api_v1_conversations_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "x-orbit-session-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Orbit-Session-Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIResponse_ConversationListResponse_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/conversations/{conversation_id}": {
+      "get": {
+        "tags": [
+          "Conversations"
+        ],
+        "summary": "Retrieve conversation details",
+        "description": "Retrieve metadata and total message count for a specific conversation thread.",
+        "operationId": "get_conversation_api_v1_conversations__conversation_id__get",
+        "parameters": [
+          {
+            "name": "conversation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Conversation Id"
+            }
+          },
+          {
+            "name": "x-orbit-session-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Orbit-Session-Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIResponse_ConversationResponse_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Conversations"
+        ],
+        "summary": "Update conversation metadata",
+        "description": "Update title or default model for an existing conversation thread.",
+        "operationId": "update_conversation_api_v1_conversations__conversation_id__patch",
+        "parameters": [
+          {
+            "name": "conversation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Conversation Id"
+            }
+          },
+          {
+            "name": "x-orbit-session-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Orbit-Session-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConversationUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIResponse_ConversationResponse_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Conversations"
+        ],
+        "summary": "Delete a conversation thread",
+        "description": "Cascade delete a conversation thread and all contained turns.",
+        "operationId": "delete_conversation_api_v1_conversations__conversation_id__delete",
+        "parameters": [
+          {
+            "name": "conversation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Conversation Id"
+            }
+          },
+          {
+            "name": "x-orbit-session-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Orbit-Session-Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIResponse_bool_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/conversations/{conversation_id}/messages": {
+      "get": {
+        "tags": [
+          "Conversations"
+        ],
+        "summary": "List messages in a conversation",
+        "description": "Retrieve ordered conversational turns for a thread.",
+        "operationId": "list_messages_api_v1_conversations__conversation_id__messages_get",
+        "parameters": [
+          {
+            "name": "conversation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Conversation Id"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 500,
+              "minimum": 1,
+              "default": 100,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "before_sequence",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Before Sequence"
+            }
+          },
+          {
+            "name": "x-orbit-session-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Orbit-Session-Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIResponse_MessageListResponse_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Conversations"
+        ],
+        "summary": "Send user message and receive assistant response synchronously",
+        "description": "Synchronously submit a user prompt, execute model inference, and return both turns.",
+        "operationId": "send_message_api_v1_conversations__conversation_id__messages_post",
+        "parameters": [
+          {
+            "name": "conversation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Conversation Id"
+            }
+          },
+          {
+            "name": "x-orbit-session-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Orbit-Session-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SendMessageRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIResponse_SendMessageResponse_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
     "schemas": {
+      "APIResponse_ConversationListResponse_": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "description": "True if operation succeeded, false otherwise"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConversationListResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Payload data returned on success"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ErrorDetail"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Error information on failure"
+          },
+          "correlation_id": {
+            "type": "string",
+            "title": "Correlation Id",
+            "description": "Unique request tracing ID"
+          },
+          "timestamp": {
+            "type": "string",
+            "title": "Timestamp",
+            "description": "ISO 8601 UTC timestamp of response generation"
+          }
+        },
+        "type": "object",
+        "required": [
+          "success",
+          "correlation_id"
+        ],
+        "title": "APIResponse[ConversationListResponse]"
+      },
+      "APIResponse_ConversationResponse_": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "description": "True if operation succeeded, false otherwise"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConversationResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Payload data returned on success"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ErrorDetail"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Error information on failure"
+          },
+          "correlation_id": {
+            "type": "string",
+            "title": "Correlation Id",
+            "description": "Unique request tracing ID"
+          },
+          "timestamp": {
+            "type": "string",
+            "title": "Timestamp",
+            "description": "ISO 8601 UTC timestamp of response generation"
+          }
+        },
+        "type": "object",
+        "required": [
+          "success",
+          "correlation_id"
+        ],
+        "title": "APIResponse[ConversationResponse]"
+      },
       "APIResponse_DetailedHealthResponse_": {
         "properties": {
           "success": {
@@ -404,6 +967,100 @@
         ],
         "title": "APIResponse[HealthResponse]"
       },
+      "APIResponse_MessageListResponse_": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "description": "True if operation succeeded, false otherwise"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MessageListResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Payload data returned on success"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ErrorDetail"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Error information on failure"
+          },
+          "correlation_id": {
+            "type": "string",
+            "title": "Correlation Id",
+            "description": "Unique request tracing ID"
+          },
+          "timestamp": {
+            "type": "string",
+            "title": "Timestamp",
+            "description": "ISO 8601 UTC timestamp of response generation"
+          }
+        },
+        "type": "object",
+        "required": [
+          "success",
+          "correlation_id"
+        ],
+        "title": "APIResponse[MessageListResponse]"
+      },
+      "APIResponse_SendMessageResponse_": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "description": "True if operation succeeded, false otherwise"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SendMessageResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Payload data returned on success"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ErrorDetail"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Error information on failure"
+          },
+          "correlation_id": {
+            "type": "string",
+            "title": "Correlation Id",
+            "description": "Unique request tracing ID"
+          },
+          "timestamp": {
+            "type": "string",
+            "title": "Timestamp",
+            "description": "ISO 8601 UTC timestamp of response generation"
+          }
+        },
+        "type": "object",
+        "required": [
+          "success",
+          "correlation_id"
+        ],
+        "title": "APIResponse[SendMessageResponse]"
+      },
       "APIResponse_SystemInfoResponse_": {
         "properties": {
           "success": {
@@ -497,6 +1154,54 @@
           "correlation_id"
         ],
         "title": "APIResponse[SystemSettingResponse]"
+      },
+      "APIResponse_bool_": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "description": "True if operation succeeded, false otherwise"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data",
+            "description": "Payload data returned on success"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ErrorDetail"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Error information on failure"
+          },
+          "correlation_id": {
+            "type": "string",
+            "title": "Correlation Id",
+            "description": "Unique request tracing ID"
+          },
+          "timestamp": {
+            "type": "string",
+            "title": "Timestamp",
+            "description": "ISO 8601 UTC timestamp of response generation"
+          }
+        },
+        "type": "object",
+        "required": [
+          "success",
+          "correlation_id"
+        ],
+        "title": "APIResponse[bool]"
       },
       "APIResponse_list_AuditEventResponse__": {
         "properties": {
@@ -594,6 +1299,148 @@
         ],
         "title": "AuditEventResponse",
         "description": "Audit event record."
+      },
+      "ConversationCreate": {
+        "properties": {
+          "title": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title",
+            "description": "Thread display title"
+          },
+          "model_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Id",
+            "description": "Default model ID"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "ConversationCreate",
+        "description": "Payload to initialize a new conversation thread."
+      },
+      "ConversationListResponse": {
+        "properties": {
+          "conversations": {
+            "items": {
+              "$ref": "#/components/schemas/ConversationResponse"
+            },
+            "type": "array",
+            "title": "Conversations"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          }
+        },
+        "type": "object",
+        "required": [
+          "conversations",
+          "total"
+        ],
+        "title": "ConversationListResponse",
+        "description": "Paginated collection of conversation threads."
+      },
+      "ConversationResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "model_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Id"
+          },
+          "last_sequence": {
+            "type": "integer",
+            "title": "Last Sequence",
+            "default": 0
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "message_count": {
+            "type": "integer",
+            "title": "Message Count",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "ConversationResponse",
+        "description": "Normalized response representation of a conversation thread."
+      },
+      "ConversationUpdate": {
+        "properties": {
+          "title": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title",
+            "description": "Updated display title"
+          },
+          "model_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Id",
+            "description": "Updated default model"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "ConversationUpdate",
+        "description": "Payload to modify conversation thread metadata."
       },
       "DetailedHealthResponse": {
         "properties": {
@@ -731,6 +1578,219 @@
         ],
         "title": "HealthResponse",
         "description": "Basic health probe response."
+      },
+      "MessageListResponse": {
+        "properties": {
+          "messages": {
+            "items": {
+              "$ref": "#/components/schemas/MessageResponse"
+            },
+            "type": "array",
+            "title": "Messages"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          }
+        },
+        "type": "object",
+        "required": [
+          "messages",
+          "total"
+        ],
+        "title": "MessageListResponse",
+        "description": "Ordered sequence of message turns within a conversation."
+      },
+      "MessageResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "conversation_id": {
+            "type": "string",
+            "title": "Conversation Id"
+          },
+          "sequence": {
+            "type": "integer",
+            "title": "Sequence"
+          },
+          "role": {
+            "type": "string",
+            "title": "Role"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "model_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Id"
+          },
+          "finish_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finish Reason"
+          },
+          "prompt_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt Tokens"
+          },
+          "completion_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completion Tokens"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "conversation_id",
+          "sequence",
+          "role",
+          "content",
+          "status",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "MessageResponse",
+        "description": "Normalized response representation of a single conversational turn."
+      },
+      "SendMessageRequest": {
+        "properties": {
+          "content": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Content",
+            "description": "User prompt text"
+          },
+          "model_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Id",
+            "description": "Model to execute this turn"
+          },
+          "temperature": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 2.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Temperature",
+            "description": "Sampling randomness"
+          },
+          "max_output_tokens": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Output Tokens",
+            "description": "Requested output token bound"
+          },
+          "system_prompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "System Prompt",
+            "description": "Optional custom system prompt for this turn"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "content"
+        ],
+        "title": "SendMessageRequest",
+        "description": "Payload for submitting a user prompt to a conversation thread."
+      },
+      "SendMessageResponse": {
+        "properties": {
+          "user_message": {
+            "$ref": "#/components/schemas/MessageResponse"
+          },
+          "assistant_message": {
+            "$ref": "#/components/schemas/MessageResponse"
+          }
+        },
+        "type": "object",
+        "required": [
+          "user_message",
+          "assistant_message"
+        ],
+        "title": "SendMessageResponse",
+        "description": "Atomic response containing the persisted user message and generated assistant turn."
       },
       "SystemInfoResponse": {
         "properties": {

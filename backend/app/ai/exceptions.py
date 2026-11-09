@@ -226,3 +226,35 @@ class MemoryPressureCriticalError(AIError):
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             details=details,
         )
+
+
+class ContextWindowExceededError(AIError):
+    """Raised when prompt tokens exceed allocated context or input budget."""
+
+    def __init__(
+        self,
+        message: str = "Input prompt exceeds allocated context window capacity",
+        details: dict[str, Any] | None = None,
+    ):
+        super().__init__(
+            message=message,
+            code="CONTEXT_WINDOW_EXCEEDED",
+            status_code=status.HTTP_400_BAD_REQUEST,
+            details=details,
+        )
+
+
+class ConversationNotFoundError(AIError):
+    """Raised when the specified conversation ID does not exist."""
+
+    def __init__(
+        self,
+        message: str = "Conversation not found",
+        details: dict[str, Any] | None = None,
+    ):
+        super().__init__(
+            message=message,
+            code="CONVERSATION_NOT_FOUND",
+            status_code=status.HTTP_404_NOT_FOUND,
+            details=details,
+        )

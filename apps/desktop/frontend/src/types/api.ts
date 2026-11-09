@@ -124,10 +124,130 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/conversations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List conversation threads
+         * @description Retrieve paginated conversation threads ordered by last updated timestamp.
+         */
+        get: operations["list_conversations_api_v1_conversations_get"];
+        put?: never;
+        /**
+         * Create a new conversation thread
+         * @description Initialize and persist a new conversation thread.
+         */
+        post: operations["create_conversation_api_v1_conversations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/conversations/{conversation_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Retrieve conversation details
+         * @description Retrieve metadata and total message count for a specific conversation thread.
+         */
+        get: operations["get_conversation_api_v1_conversations__conversation_id__get"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete a conversation thread
+         * @description Cascade delete a conversation thread and all contained turns.
+         */
+        delete: operations["delete_conversation_api_v1_conversations__conversation_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Update conversation metadata
+         * @description Update title or default model for an existing conversation thread.
+         */
+        patch: operations["update_conversation_api_v1_conversations__conversation_id__patch"];
+        trace?: never;
+    };
+    "/api/v1/conversations/{conversation_id}/messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List messages in a conversation
+         * @description Retrieve ordered conversational turns for a thread.
+         */
+        get: operations["list_messages_api_v1_conversations__conversation_id__messages_get"];
+        put?: never;
+        /**
+         * Send user message and receive assistant response synchronously
+         * @description Synchronously submit a user prompt, execute model inference, and return both turns.
+         */
+        post: operations["send_message_api_v1_conversations__conversation_id__messages_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** APIResponse[ConversationListResponse] */
+        APIResponse_ConversationListResponse_: {
+            /**
+             * Success
+             * @description True if operation succeeded, false otherwise
+             */
+            success: boolean;
+            /** @description Payload data returned on success */
+            data?: components["schemas"]["ConversationListResponse"] | null;
+            /** @description Error information on failure */
+            error?: components["schemas"]["ErrorDetail"] | null;
+            /**
+             * Correlation Id
+             * @description Unique request tracing ID
+             */
+            correlation_id: string;
+            /**
+             * Timestamp
+             * @description ISO 8601 UTC timestamp of response generation
+             */
+            timestamp?: string;
+        };
+        /** APIResponse[ConversationResponse] */
+        APIResponse_ConversationResponse_: {
+            /**
+             * Success
+             * @description True if operation succeeded, false otherwise
+             */
+            success: boolean;
+            /** @description Payload data returned on success */
+            data?: components["schemas"]["ConversationResponse"] | null;
+            /** @description Error information on failure */
+            error?: components["schemas"]["ErrorDetail"] | null;
+            /**
+             * Correlation Id
+             * @description Unique request tracing ID
+             */
+            correlation_id: string;
+            /**
+             * Timestamp
+             * @description ISO 8601 UTC timestamp of response generation
+             */
+            timestamp?: string;
+        };
         /** APIResponse[DetailedHealthResponse] */
         APIResponse_DetailedHealthResponse_: {
             /**
@@ -172,6 +292,50 @@ export interface components {
              */
             timestamp?: string;
         };
+        /** APIResponse[MessageListResponse] */
+        APIResponse_MessageListResponse_: {
+            /**
+             * Success
+             * @description True if operation succeeded, false otherwise
+             */
+            success: boolean;
+            /** @description Payload data returned on success */
+            data?: components["schemas"]["MessageListResponse"] | null;
+            /** @description Error information on failure */
+            error?: components["schemas"]["ErrorDetail"] | null;
+            /**
+             * Correlation Id
+             * @description Unique request tracing ID
+             */
+            correlation_id: string;
+            /**
+             * Timestamp
+             * @description ISO 8601 UTC timestamp of response generation
+             */
+            timestamp?: string;
+        };
+        /** APIResponse[SendMessageResponse] */
+        APIResponse_SendMessageResponse_: {
+            /**
+             * Success
+             * @description True if operation succeeded, false otherwise
+             */
+            success: boolean;
+            /** @description Payload data returned on success */
+            data?: components["schemas"]["SendMessageResponse"] | null;
+            /** @description Error information on failure */
+            error?: components["schemas"]["ErrorDetail"] | null;
+            /**
+             * Correlation Id
+             * @description Unique request tracing ID
+             */
+            correlation_id: string;
+            /**
+             * Timestamp
+             * @description ISO 8601 UTC timestamp of response generation
+             */
+            timestamp?: string;
+        };
         /** APIResponse[SystemInfoResponse] */
         APIResponse_SystemInfoResponse_: {
             /**
@@ -203,6 +367,31 @@ export interface components {
             success: boolean;
             /** @description Payload data returned on success */
             data?: components["schemas"]["SystemSettingResponse"] | null;
+            /** @description Error information on failure */
+            error?: components["schemas"]["ErrorDetail"] | null;
+            /**
+             * Correlation Id
+             * @description Unique request tracing ID
+             */
+            correlation_id: string;
+            /**
+             * Timestamp
+             * @description ISO 8601 UTC timestamp of response generation
+             */
+            timestamp?: string;
+        };
+        /** APIResponse[bool] */
+        APIResponse_bool_: {
+            /**
+             * Success
+             * @description True if operation succeeded, false otherwise
+             */
+            success: boolean;
+            /**
+             * Data
+             * @description Payload data returned on success
+             */
+            data?: boolean | null;
             /** @description Error information on failure */
             error?: components["schemas"]["ErrorDetail"] | null;
             /**
@@ -265,6 +454,80 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+        };
+        /**
+         * ConversationCreate
+         * @description Payload to initialize a new conversation thread.
+         */
+        ConversationCreate: {
+            /**
+             * Title
+             * @description Thread display title
+             */
+            title?: string | null;
+            /**
+             * Model Id
+             * @description Default model ID
+             */
+            model_id?: string | null;
+        };
+        /**
+         * ConversationListResponse
+         * @description Paginated collection of conversation threads.
+         */
+        ConversationListResponse: {
+            /** Conversations */
+            conversations: components["schemas"]["ConversationResponse"][];
+            /** Total */
+            total: number;
+        };
+        /**
+         * ConversationResponse
+         * @description Normalized response representation of a conversation thread.
+         */
+        ConversationResponse: {
+            /** Id */
+            id: string;
+            /** Title */
+            title: string;
+            /** Model Id */
+            model_id?: string | null;
+            /**
+             * Last Sequence
+             * @default 0
+             */
+            last_sequence: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /**
+             * Message Count
+             * @default 0
+             */
+            message_count: number;
+        };
+        /**
+         * ConversationUpdate
+         * @description Payload to modify conversation thread metadata.
+         */
+        ConversationUpdate: {
+            /**
+             * Title
+             * @description Updated display title
+             */
+            title?: string | null;
+            /**
+             * Model Id
+             * @description Updated default model
+             */
+            model_id?: string | null;
         };
         /**
          * DetailedHealthResponse
@@ -365,6 +628,93 @@ export interface components {
              * @description Elapsed uptime of the backend process
              */
             uptime_seconds: number;
+        };
+        /**
+         * MessageListResponse
+         * @description Ordered sequence of message turns within a conversation.
+         */
+        MessageListResponse: {
+            /** Messages */
+            messages: components["schemas"]["MessageResponse"][];
+            /** Total */
+            total: number;
+        };
+        /**
+         * MessageResponse
+         * @description Normalized response representation of a single conversational turn.
+         */
+        MessageResponse: {
+            /** Id */
+            id: string;
+            /** Conversation Id */
+            conversation_id: string;
+            /** Sequence */
+            sequence: number;
+            /** Role */
+            role: string;
+            /** Content */
+            content: string;
+            /** Status */
+            status: string;
+            /** Model Id */
+            model_id?: string | null;
+            /** Finish Reason */
+            finish_reason?: string | null;
+            /** Prompt Tokens */
+            prompt_tokens?: number | null;
+            /** Completion Tokens */
+            completion_tokens?: number | null;
+            /** Error Message */
+            error_message?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
+         * SendMessageRequest
+         * @description Payload for submitting a user prompt to a conversation thread.
+         */
+        SendMessageRequest: {
+            /**
+             * Content
+             * @description User prompt text
+             */
+            content: string;
+            /**
+             * Model Id
+             * @description Model to execute this turn
+             */
+            model_id?: string | null;
+            /**
+             * Temperature
+             * @description Sampling randomness
+             */
+            temperature?: number | null;
+            /**
+             * Max Output Tokens
+             * @description Requested output token bound
+             */
+            max_output_tokens?: number | null;
+            /**
+             * System Prompt
+             * @description Optional custom system prompt for this turn
+             */
+            system_prompt?: string | null;
+        };
+        /**
+         * SendMessageResponse
+         * @description Atomic response containing the persisted user message and generated assistant turn.
+         */
+        SendMessageResponse: {
+            user_message: components["schemas"]["MessageResponse"];
+            assistant_message: components["schemas"]["MessageResponse"];
         };
         /**
          * SystemInfoResponse
@@ -621,6 +971,251 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["APIResponse_list_AuditEventResponse__"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_conversations_api_v1_conversations_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+            };
+            header?: {
+                "x-orbit-session-token"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIResponse_ConversationListResponse_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_conversation_api_v1_conversations_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-orbit-session-token"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConversationCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIResponse_ConversationResponse_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_conversation_api_v1_conversations__conversation_id__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-orbit-session-token"?: string | null;
+            };
+            path: {
+                conversation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIResponse_ConversationResponse_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_conversation_api_v1_conversations__conversation_id__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-orbit-session-token"?: string | null;
+            };
+            path: {
+                conversation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIResponse_bool_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_conversation_api_v1_conversations__conversation_id__patch: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-orbit-session-token"?: string | null;
+            };
+            path: {
+                conversation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConversationUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIResponse_ConversationResponse_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_messages_api_v1_conversations__conversation_id__messages_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                before_sequence?: number | null;
+            };
+            header?: {
+                "x-orbit-session-token"?: string | null;
+            };
+            path: {
+                conversation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIResponse_MessageListResponse_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    send_message_api_v1_conversations__conversation_id__messages_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-orbit-session-token"?: string | null;
+            };
+            path: {
+                conversation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SendMessageRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIResponse_SendMessageResponse_"];
                 };
             };
             /** @description Validation Error */
