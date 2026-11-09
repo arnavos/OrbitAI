@@ -3,6 +3,7 @@
 import math
 
 from app.ai.exceptions import ContextWindowExceededError
+from app.ai.prompts import ORBIT_SYSTEM_PROMPT
 from app.ai.types import ChatMessage, MessageRole
 from app.models.conversation import Message
 
@@ -10,6 +11,7 @@ from app.models.conversation import Message
 class ContextManager:
     """Manages context assembly, output headroom reservation, and deterministic history pruning."""
 
+    DEFAULT_SYSTEM_PROMPT = ORBIT_SYSTEM_PROMPT
     DEFAULT_OUTPUT_HEADROOM = 1024
     MIN_OUTPUT_HEADROOM = 64
     FRAMING_MARGIN_TOKENS = 32

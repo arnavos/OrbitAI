@@ -13,6 +13,7 @@ from app.ai.exceptions import (
     ProviderUnavailableError,
     UnsupportedCapabilityError,
 )
+from app.ai.prompts import ORBIT_SYSTEM_PROMPT, resolve_system_prompt
 from app.ai.provider import ModelProvider
 from app.ai.providers import OllamaProvider
 from app.ai.registry import DiscoveryResult, ModelRegistry
@@ -54,11 +55,13 @@ __all__ = [
     "ModelProvider",
     "ModelRegistry",
     "OllamaProvider",
+    "ORBIT_SYSTEM_PROMPT",
     "ProviderHealth",
     "ProviderNotFoundError",
     "ProviderStatus",
     "ProviderType",
     "ProviderUnavailableError",
+    "resolve_system_prompt",
     "TokenDelta",
     "TokenUsage",
     "UnsupportedCapabilityError",

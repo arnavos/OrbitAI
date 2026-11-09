@@ -15,6 +15,7 @@ from app.ai.exceptions import (
     AIError,
     ConversationNotFoundError,
 )
+from app.ai.prompts import resolve_system_prompt
 from app.ai.provider import ModelProvider
 from app.ai.registry import ModelRegistry
 from app.ai.resources.manager import ResourceManager
@@ -455,11 +456,13 @@ class ConversationService:
                     f"Error consulting ResourceManager: {eval_err}, using default context"
                 )
 
+        effective_system_prompt = resolve_system_prompt(payload.system_prompt)
+
         assembled_messages, max_output, _ = ContextManager.assemble_context(
             history=history,
             latest_user_content=user_content,
             allocated_context=allocated_context,
-            system_prompt=payload.system_prompt,
+            system_prompt=effective_system_prompt,
             requested_max_output_tokens=payload.max_output_tokens,
         )
 

@@ -206,6 +206,7 @@ Total run time: **21 seconds**.
 | Context Token Meter | `ContextMeter.tsx` | `ChatInterface.test.tsx` | **COMPLETED** |
 | Dark / Light Theme Toggle | `ThemeContext.tsx`, `index.css` | `ChatInterface.test.tsx` | **COMPLETED** |
 | M0 Diagnostics Coexistence | `SystemDiagnosticsView.tsx`, `TitleBar.tsx` | Baseline tests + visual tabs | **COMPLETED** |
+| Canonical Assistant Persona & Identity | `core/prompts.py`, `ai/prompts.py`, `conversation_service.py` | `test_assistant_identity.py` (7 tests) | **COMPLETED** |
 
 ---
 

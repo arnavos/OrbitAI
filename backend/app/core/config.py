@@ -11,6 +11,8 @@ from typing import Literal, Self
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from app.core.prompts import ORBIT_SYSTEM_PROMPT
+
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
 
@@ -95,6 +97,13 @@ class Settings(BaseSettings):
         default="5m",
         validation_alias="ORBIT_OLLAMA_KEEP_ALIVE",
         description="Model memory residency duration in Ollama daemon (e.g. '5m', '0')",
+    )
+
+    # AI Persona & System Instructions
+    default_system_prompt: str = Field(
+        default=ORBIT_SYSTEM_PROMPT,
+        validation_alias="ORBIT_DEFAULT_SYSTEM_PROMPT",
+        description="Canonical baseline system prompt defining assistant persona and identity",
     )
 
     # Resource Manager & Memory Safeguards (M1.3)
