@@ -108,13 +108,13 @@ class Settings(BaseSettings):
 
     # Resource Manager & Memory Safeguards (M1.3)
     resource_os_safety_reserve_bytes: int = Field(
-        default=3_758_096_384,  # 3.5 GB
+        default=1_073_741_824,  # 1.0 GB
         ge=536_870_912,  # Min 512 MB
         validation_alias="ORBIT_RESOURCE_OS_SAFETY_RESERVE_BYTES",
         description="Headroom floor reserved for macOS kernel and apps",
     )
     resource_inactive_reclaim_factor: float = Field(
-        default=0.30,
+        default=0.70,
         ge=0.0,
         le=1.0,
         validation_alias="ORBIT_RESOURCE_INACTIVE_RECLAIM_FACTOR",

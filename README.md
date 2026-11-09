@@ -63,7 +63,16 @@ make verify
 
 Executes the unified 10-stage M0 verification runner (`scripts/verify_m0.sh`), validating OpenAPI contract drift, Python lint/format, clean-state SQLite migrations, pytest backend suite, frontend type safety, vitest component suite, frontend production build, and Rust clippy/tests.
 
-### 3. Launch Native Desktop Application
+### 3. Ensure Local Ollama Daemon & Model
+
+ORBIT connects locally to Ollama for privacy-focused local inference:
+
+```bash
+# Pull the recommended default local model
+ollama pull llama3.2:3b
+```
+
+### 4. Launch Native Desktop Application
 
 ```bash
 pnpm tauri dev
@@ -71,7 +80,7 @@ pnpm tauri dev
 
 Launches the native macOS desktop shell, automatically spawning and supervising the Python backend sidecar with ephemeral loopback port allocation and secure single-use session credential handover.
 
-### 4. Run Idle Memory Benchmark
+### 5. Run Idle Memory Benchmark
 
 ```bash
 make benchmark
@@ -84,5 +93,8 @@ Executes `scripts/benchmark_memory.py`, reporting individual RSS and macOS physi
 ## Milestone Verification & Architecture Documentation
 
 For complete verification artifacts, benchmark analysis, security audits, and lifecycle runbooks, see:
-- [`docs/M0_VERIFICATION.md`](docs/M0_VERIFICATION.md)
-# OrbitAI
+- [`docs/M0_VERIFICATION.md`](docs/M0_VERIFICATION.md) — Engineering Foundation
+- [`docs/m1_5_architecture.md`](docs/m1_5_architecture.md) — Streaming Transport Architecture
+- [`docs/m1_6_architecture.md`](docs/m1_6_architecture.md) — Desktop Chat Interface Architecture
+- [`docs/m1_6_identity_and_persona.md`](docs/m1_6_identity_and_persona.md) — Canonical Assistant Identity & Persona
+- [`docs/m1_7_release_report.md`](docs/m1_7_release_report.md) — ORBIT v0.1.0 Release Report
